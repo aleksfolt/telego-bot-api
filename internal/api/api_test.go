@@ -1,7 +1,10 @@
 package api_test
 
 import (
+	"bytes"
 	"encoding/json"
+	"mime/multipart"
+	"os"
 	"testing"
 
 	"telego-bot-api/internal/api"
@@ -108,5 +111,80 @@ func TestApiResponse_ParametersSerialization(t *testing.T) {
 	require.Equal(t, 429, decoded.ErrorCode)
 	require.NotNil(t, decoded.Parameters)
 	require.Equal(t, 10, decoded.Parameters.RetryAfter)
+}
+
+func TestExtractFileFromRequest(t *testing.T) {
+	// 1. Test attach:// with multipart file header (grammY InputFile behavior)
+	{
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+
+		err := writer.WriteField("chat_id", "12345")
+		require.NoError(t, err)
+		err = writer.WriteField("document", "attach://upload_part_123")
+		require.NoError(t, err)
+
+		part, err := writer.CreateFormFile("upload_part_123", "archive.zip")
+		require.NoError(t, err)
+		_, err = part.Write([]byte("dummy zip content"))
+		require.NoError(t, err)
+
+		err = writer.Close()
+		require.NoError(t, err)
+
+		ctx := &fasthttp.RequestCtx{}
+		ctx.Request.Header.SetContentType(writer.FormDataContentType())
+		ctx.Request.SetBody(body.Bytes())
+
+		data, filename := api.ExtractFileFromRequest(ctx, "document", "attach://upload_part_123")
+		assert.Equal(t, "archive.zip", filename)
+		assert.Equal(t, []byte("dummy zip content"), data)
+	}
+
+	// 2. Test direct multipart field name
+	{
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+
+		part, err := writer.CreateFormFile("photo", "image.png")
+		require.NoError(t, err)
+		_, err = part.Write([]byte("image bytes"))
+		require.NoError(t, err)
+
+		err = writer.Close()
+		require.NoError(t, err)
+
+		ctx := &fasthttp.RequestCtx{}
+		ctx.Request.Header.SetContentType(writer.FormDataContentType())
+		ctx.Request.SetBody(body.Bytes())
+
+		data, filename := api.ExtractFileFromRequest(ctx, "photo", "")
+		assert.Equal(t, "image.png", filename)
+		assert.Equal(t, []byte("image bytes"), data)
+	}
+
+	// 3. Test local file path
+	{
+		tmpFile, err := os.CreateTemp("", "test_doc_*.txt")
+		require.NoError(t, err)
+		defer os.Remove(tmpFile.Name())
+
+		_, err = tmpFile.WriteString("local file data")
+		require.NoError(t, err)
+		_ = tmpFile.Close()
+
+		ctx := &fasthttp.RequestCtx{}
+		data, filename := api.ExtractFileFromRequest(ctx, "document", tmpFile.Name())
+		assert.Equal(t, []byte("local file data"), data)
+		assert.NotEmpty(t, filename)
+	}
+
+	// 4. Test missing attachment returns empty
+	{
+		ctx := &fasthttp.RequestCtx{}
+		data, filename := api.ExtractFileFromRequest(ctx, "document", "attach://non_existent")
+		assert.Nil(t, data)
+		assert.Empty(t, filename)
+	}
 }
 

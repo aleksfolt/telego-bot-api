@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"mime"
+	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -1312,6 +1315,42 @@ func (b *BotInstance) EditMessageMedia(ctx context.Context, req *converter.EditM
 	}, nil
 }
 
+func createReplyTo(replyParams *converter.ReplyParameters, replyToMsgID int64, threadID int) tg.InputReplyToClass {
+	if replyParams != nil && replyParams.MessageID > 0 {
+		return &tg.InputReplyToMessage{
+			ReplyToMsgID: int(replyParams.MessageID),
+			TopMsgID:     threadID,
+		}
+	}
+	if replyToMsgID > 0 {
+		return &tg.InputReplyToMessage{
+			ReplyToMsgID: int(replyToMsgID),
+			TopMsgID:     threadID,
+		}
+	}
+	if threadID > 0 {
+		return &tg.InputReplyToMessage{
+			ReplyToMsgID: threadID,
+			TopMsgID:     threadID,
+		}
+	}
+	return nil
+}
+
+func (b *BotInstance) sendMedia(ctx context.Context, businessConnectionID string, sendReq *tg.MessagesSendMediaRequest) (tg.UpdatesClass, error) {
+	if businessConnectionID != "" {
+		var box tg.UpdatesBox
+		if err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
+			ConnectionID: businessConnectionID,
+			Query:        sendReq,
+		}, &box); err != nil {
+			return nil, err
+		}
+		return box.Updates, nil
+	}
+	return b.raw.MessagesSendMedia(ctx, sendReq)
+}
+
 // SendPhoto sends a photo to a chat with optional caption and markup.
 func (b *BotInstance) SendPhoto(ctx context.Context, req *converter.SendPhotoRequest) (*converter.Message, error) {
 	peer, err := b.resolvePeer(req.ChatID)
@@ -1348,6 +1387,8 @@ func (b *BotInstance) SendPhoto(ctx context.Context, req *converter.SendPhotoReq
 			File:    inputFile,
 			Spoiler: req.HasSpoiler,
 		}
+	} else if strings.HasPrefix(req.Photo, "attach://") {
+		return nil, fmt.Errorf("attachment %q not found in request files", req.Photo)
 	} else if isMediaURL(req.Photo) {
 		cachedPhoto := b.getPhotoCache(ctx, req.Photo)
 		if cachedPhoto != nil {
@@ -1385,29 +1426,54 @@ func (b *BotInstance) SendPhoto(ctx context.Context, req *converter.SendPhotoReq
 			}
 		}
 	} else {
-		fid, err := fileid.DecodeFileID(req.Photo)
-		if err == nil && (fid.Type == fileid.Photo || fid.Type == fileid.Thumbnail) {
-			media = &tg.InputMediaPhoto{
-				ID: &tg.InputPhoto{
-					ID:            fid.ID,
-					AccessHash:    fid.AccessHash,
-					FileReference: fid.FileReference,
-				},
-				Spoiler: req.HasSpoiler,
+		// Check local file if path exists
+		localPath := strings.TrimPrefix(req.Photo, "file://")
+		if (strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../")) {
+			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
+				data, err := os.ReadFile(localPath)
+				if err == nil && len(data) > 0 {
+					fileName := filepath.Base(localPath)
+					u := uploader.NewUploader(b.raw)
+					inputFile, err := u.FromBytes(ctx, fileName, data)
+					if err != nil {
+						return nil, fmt.Errorf("upload local photo bytes: %w", err)
+					}
+					media = &tg.InputMediaUploadedPhoto{
+						File:    inputFile,
+						Spoiler: req.HasSpoiler,
+					}
+				}
 			}
-		} else if err == nil && fid.Type == fileid.Document {
-			media = &tg.InputMediaDocument{
-				ID: &tg.InputDocument{
-					ID:            fid.ID,
-					AccessHash:    fid.AccessHash,
-					FileReference: fid.FileReference,
-				},
-				Spoiler: req.HasSpoiler,
-			}
-		} else {
-			media = &tg.InputMediaPhotoExternal{
-				URL:     req.Photo,
-				Spoiler: req.HasSpoiler,
+		}
+
+		if media == nil {
+			fid, err := fileid.DecodeFileID(req.Photo)
+			if err == nil && (fid.Type == fileid.Photo || fid.Type == fileid.Thumbnail) {
+				media = &tg.InputMediaPhoto{
+					ID: &tg.InputPhoto{
+						ID:            fid.ID,
+						AccessHash:    fid.AccessHash,
+						FileReference: fid.FileReference,
+					},
+					Spoiler: req.HasSpoiler,
+				}
+			} else if err == nil && fid.Type == fileid.Document {
+				media = &tg.InputMediaDocument{
+					ID: &tg.InputDocument{
+						ID:            fid.ID,
+						AccessHash:    fid.AccessHash,
+						FileReference: fid.FileReference,
+					},
+					Spoiler: req.HasSpoiler,
+				}
+			} else {
+				if !strings.HasPrefix(req.Photo, "http://") && !strings.HasPrefix(req.Photo, "https://") {
+					return nil, fmt.Errorf("invalid file_id or photo path: %s", req.Photo)
+				}
+				media = &tg.InputMediaPhotoExternal{
+					URL:     req.Photo,
+					Spoiler: req.HasSpoiler,
+				}
 			}
 		}
 	}
@@ -1428,39 +1494,11 @@ func (b *BotInstance) SendPhoto(ctx context.Context, req *converter.SendPhotoReq
 		sendReq.ReplyMarkup = markup
 	}
 
-	if req.ReplyParameters != nil && req.ReplyParameters.MessageID > 0 {
-		sendReq.ReplyTo = &tg.InputReplyToMessage{
-			ReplyToMsgID: int(req.ReplyParameters.MessageID),
-			TopMsgID:     req.MessageThreadID,
-		}
-	} else if req.ReplyToMessageID > 0 {
-		sendReq.ReplyTo = &tg.InputReplyToMessage{
-			ReplyToMsgID: int(req.ReplyToMessageID),
-			TopMsgID:     req.MessageThreadID,
-		}
-	} else if req.MessageThreadID > 0 {
-		sendReq.ReplyTo = &tg.InputReplyToMessage{
-			ReplyToMsgID: req.MessageThreadID,
-			TopMsgID:     req.MessageThreadID,
-		}
-	}
+	sendReq.ReplyTo = createReplyTo(req.ReplyParameters, req.ReplyToMessageID, req.MessageThreadID)
 
-	var updates tg.UpdatesClass
-	if req.BusinessConnectionID != "" {
-		var box tg.UpdatesBox
-		err = b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-			ConnectionID: req.BusinessConnectionID,
-			Query:        sendReq,
-		}, &box)
-		if err != nil {
-			return nil, fmt.Errorf("mtproto business send photo: %w", err)
-		}
-		updates = box.Updates
-	} else {
-		updates, err = b.raw.MessagesSendMedia(ctx, sendReq)
-		if err != nil {
-			return nil, fmt.Errorf("mtproto send photo: %w", err)
-		}
+	updates, err := b.sendMedia(ctx, req.BusinessConnectionID, sendReq)
+	if err != nil {
+		return nil, fmt.Errorf("mtproto send photo: %w", err)
 	}
 
 	msgID := extractSentMessageID(updates)
@@ -1547,6 +1585,8 @@ func (b *BotInstance) SendVideo(ctx context.Context, req *converter.SendVideoReq
 				},
 			},
 		}
+	} else if strings.HasPrefix(req.Video, "attach://") {
+		return nil, fmt.Errorf("attachment %q not found in request files", req.Video)
 	} else if isMediaURL(req.Video) {
 		if cachedDoc := b.getDocCache(ctx, req.Video); cachedDoc != nil {
 			media = &tg.InputMediaDocument{
@@ -1579,20 +1619,56 @@ func (b *BotInstance) SendVideo(ctx context.Context, req *converter.SendVideoReq
 			}
 		}
 	} else {
-		fid, err := fileid.DecodeFileID(req.Video)
-		if err == nil {
-			media = &tg.InputMediaDocument{
-				ID: &tg.InputDocument{
-					ID:            fid.ID,
-					AccessHash:    fid.AccessHash,
-					FileReference: fid.FileReference,
-				},
-				Spoiler: req.HasSpoiler,
+		// Check local file if path exists
+		localPath := strings.TrimPrefix(req.Video, "file://")
+		if (strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../")) {
+			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
+				data, err := os.ReadFile(localPath)
+				if err == nil && len(data) > 0 {
+					fileName := filepath.Base(localPath)
+					u := uploader.NewUploader(b.raw)
+					inputFile, err := u.FromBytes(ctx, fileName, data)
+					if err != nil {
+						return nil, fmt.Errorf("upload local video bytes: %w", err)
+					}
+					media = &tg.InputMediaUploadedDocument{
+						File:         inputFile,
+						MimeType:     "video/mp4",
+						Spoiler:      req.HasSpoiler,
+						NosoundVideo: false,
+						Attributes: []tg.DocumentAttributeClass{
+							&tg.DocumentAttributeVideo{
+								Duration:          float64(req.Duration),
+								W:                 req.Width,
+								H:                 req.Height,
+								SupportsStreaming: req.SupportsStreaming,
+							},
+							&tg.DocumentAttributeFilename{FileName: fileName},
+						},
+					}
+				}
 			}
-		} else {
-			media = &tg.InputMediaDocumentExternal{
-				URL:     req.Video,
-				Spoiler: req.HasSpoiler,
+		}
+
+		if media == nil {
+			fid, err := fileid.DecodeFileID(req.Video)
+			if err == nil {
+				media = &tg.InputMediaDocument{
+					ID: &tg.InputDocument{
+						ID:            fid.ID,
+						AccessHash:    fid.AccessHash,
+						FileReference: fid.FileReference,
+					},
+					Spoiler: req.HasSpoiler,
+				}
+			} else {
+				if !strings.HasPrefix(req.Video, "http://") && !strings.HasPrefix(req.Video, "https://") {
+					return nil, fmt.Errorf("invalid file_id or video path: %s", req.Video)
+				}
+				media = &tg.InputMediaDocumentExternal{
+					URL:     req.Video,
+					Spoiler: req.HasSpoiler,
+				}
 			}
 		}
 	}
@@ -1613,19 +1689,9 @@ func (b *BotInstance) SendVideo(ctx context.Context, req *converter.SendVideoReq
 		sendReq.ReplyMarkup = markup
 	}
 
-	if req.ReplyParameters != nil && req.ReplyParameters.MessageID > 0 {
-		sendReq.ReplyTo = &tg.InputReplyToMessage{
-			ReplyToMsgID: int(req.ReplyParameters.MessageID),
-			TopMsgID:     req.MessageThreadID,
-		}
-	} else if req.ReplyToMessageID > 0 {
-		sendReq.ReplyTo = &tg.InputReplyToMessage{
-			ReplyToMsgID: int(req.ReplyToMessageID),
-			TopMsgID:     req.MessageThreadID,
-		}
-	}
+	sendReq.ReplyTo = createReplyTo(req.ReplyParameters, req.ReplyToMessageID, req.MessageThreadID)
 
-	updates, err := b.raw.MessagesSendMedia(ctx, sendReq)
+	updates, err := b.sendMedia(ctx, req.BusinessConnectionID, sendReq)
 	if err != nil {
 		return nil, fmt.Errorf("mtproto send video: %w", err)
 	}
@@ -1693,30 +1759,96 @@ func (b *BotInstance) SendDocument(ctx context.Context, req *converter.SendDocum
 		if err != nil {
 			return nil, fmt.Errorf("upload document bytes: %w", err)
 		}
+		mimeType := "application/octet-stream"
+		if !req.DisableContentTypeDetection {
+			if extMime := mime.TypeByExtension(filepath.Ext(fileName)); extMime != "" {
+				mimeType = extMime
+			} else if len(req.DocumentData) > 0 {
+				mimeType = http.DetectContentType(req.DocumentData)
+			}
+		}
 		media = &tg.InputMediaUploadedDocument{
 			File:     inputFile,
-			MimeType: "application/octet-stream",
+			MimeType: mimeType,
 			Attributes: []tg.DocumentAttributeClass{
 				&tg.DocumentAttributeFilename{FileName: fileName},
 			},
 		}
-	} else if strings.HasPrefix(req.Document, "http://") || strings.HasPrefix(req.Document, "https://") {
-		media = &tg.InputMediaDocumentExternal{
-			URL: req.Document,
-		}
-	} else {
-		fid, err := fileid.DecodeFileID(req.Document)
-		if err == nil {
+	} else if strings.HasPrefix(req.Document, "attach://") {
+		return nil, fmt.Errorf("attachment %q not found in request files", req.Document)
+	} else if isMediaURL(req.Document) {
+		if cachedDoc := b.getDocCache(ctx, req.Document); cachedDoc != nil {
 			media = &tg.InputMediaDocument{
-				ID: &tg.InputDocument{
-					ID:            fid.ID,
-					AccessHash:    fid.AccessHash,
-					FileReference: fid.FileReference,
-				},
+				ID: cachedDoc,
 			}
 		} else {
-			media = &tg.InputMediaDocumentExternal{
-				URL: req.Document,
+			inputFile, mimeType, fileName, err := b.uploadFromURL(ctx, req.Document)
+			if err == nil {
+				if fileName == "" {
+					fileName = "document.bin"
+				}
+				media = &tg.InputMediaUploadedDocument{
+					File:     inputFile,
+					MimeType: mimeType,
+					Attributes: []tg.DocumentAttributeClass{
+						&tg.DocumentAttributeFilename{FileName: fileName},
+					},
+				}
+			} else {
+				media = &tg.InputMediaDocumentExternal{
+					URL: req.Document,
+				}
+			}
+		}
+	} else {
+		// Check local file if path exists
+		localPath := strings.TrimPrefix(req.Document, "file://")
+		if (strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../")) {
+			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
+				data, err := os.ReadFile(localPath)
+				if err == nil && len(data) > 0 {
+					fileName := filepath.Base(localPath)
+					u := uploader.NewUploader(b.raw)
+					inputFile, err := u.FromBytes(ctx, fileName, data)
+					if err != nil {
+						return nil, fmt.Errorf("upload local document bytes: %w", err)
+					}
+					mimeType := "application/octet-stream"
+					if !req.DisableContentTypeDetection {
+						if extMime := mime.TypeByExtension(filepath.Ext(fileName)); extMime != "" {
+							mimeType = extMime
+						} else {
+							mimeType = http.DetectContentType(data)
+						}
+					}
+					media = &tg.InputMediaUploadedDocument{
+						File:     inputFile,
+						MimeType: mimeType,
+						Attributes: []tg.DocumentAttributeClass{
+							&tg.DocumentAttributeFilename{FileName: fileName},
+						},
+					}
+				}
+			}
+		}
+
+		if media == nil {
+			fid, err := fileid.DecodeFileID(req.Document)
+			if err == nil {
+				media = &tg.InputMediaDocument{
+					ID: &tg.InputDocument{
+						ID:            fid.ID,
+						AccessHash:    fid.AccessHash,
+						FileReference: fid.FileReference,
+					},
+				}
+			} else {
+				if !strings.HasPrefix(req.Document, "http://") && !strings.HasPrefix(req.Document, "https://") {
+					return nil, fmt.Errorf("invalid file_id or document path: %s", req.Document)
+				}
+				media = &tg.InputMediaDocumentExternal{
+					URL: req.Document,
+				}
 			}
 		}
 	}
@@ -1737,19 +1869,9 @@ func (b *BotInstance) SendDocument(ctx context.Context, req *converter.SendDocum
 		sendReq.ReplyMarkup = markup
 	}
 
-	if req.ReplyParameters != nil && req.ReplyParameters.MessageID > 0 {
-		sendReq.ReplyTo = &tg.InputReplyToMessage{
-			ReplyToMsgID: int(req.ReplyParameters.MessageID),
-			TopMsgID:     req.MessageThreadID,
-		}
-	} else if req.ReplyToMessageID > 0 {
-		sendReq.ReplyTo = &tg.InputReplyToMessage{
-			ReplyToMsgID: int(req.ReplyToMessageID),
-			TopMsgID:     req.MessageThreadID,
-		}
-	}
+	sendReq.ReplyTo = createReplyTo(req.ReplyParameters, req.ReplyToMessageID, req.MessageThreadID)
 
-	updates, err := b.raw.MessagesSendMedia(ctx, sendReq)
+	updates, err := b.sendMedia(ctx, req.BusinessConnectionID, sendReq)
 	if err != nil {
 		return nil, fmt.Errorf("mtproto send document: %w", err)
 	}
@@ -1770,6 +1892,18 @@ func (b *BotInstance) SendVoice(ctx context.Context, req *converter.SendVoiceReq
 	peer, err := b.resolvePeer(req.ChatID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve peer: %w", err)
+	}
+
+	caption := req.Caption
+	var entities []tg.MessageEntityClass
+	if len(req.CaptionEntities) > 0 {
+		entities = converter.ConvertEntities(req.CaptionEntities)
+	} else if req.ParseMode != "" {
+		cleanCaption, parsedEntities, err := converter.ParseTextFormatting(req.Caption, req.ParseMode)
+		if err == nil {
+			caption = cleanCaption
+			entities = parsedEntities
+		}
 	}
 
 	var media tg.InputMediaClass
@@ -1793,9 +1927,70 @@ func (b *BotInstance) SendVoice(ctx context.Context, req *converter.SendVoiceReq
 				},
 			},
 		}
+	} else if strings.HasPrefix(req.Voice, "attach://") {
+		return nil, fmt.Errorf("attachment %q not found in request files", req.Voice)
+	} else if isMediaURL(req.Voice) {
+		inputFile, _, _, err := b.uploadFromURL(ctx, req.Voice)
+		if err == nil {
+			media = &tg.InputMediaUploadedDocument{
+				File:     inputFile,
+				MimeType: "audio/ogg",
+				Attributes: []tg.DocumentAttributeClass{
+					&tg.DocumentAttributeAudio{
+						Voice:    true,
+						Duration: req.Duration,
+					},
+				},
+			}
+		} else {
+			media = &tg.InputMediaDocumentExternal{
+				URL: req.Voice,
+			}
+		}
 	} else {
-		media = &tg.InputMediaDocumentExternal{
-			URL: req.Voice,
+		localPath := strings.TrimPrefix(req.Voice, "file://")
+		if (strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../")) {
+			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
+				data, err := os.ReadFile(localPath)
+				if err == nil && len(data) > 0 {
+					fileName := filepath.Base(localPath)
+					u := uploader.NewUploader(b.raw)
+					inputFile, err := u.FromBytes(ctx, fileName, data)
+					if err != nil {
+						return nil, fmt.Errorf("upload local voice bytes: %w", err)
+					}
+					media = &tg.InputMediaUploadedDocument{
+						File:     inputFile,
+						MimeType: "audio/ogg",
+						Attributes: []tg.DocumentAttributeClass{
+							&tg.DocumentAttributeAudio{
+								Voice:    true,
+								Duration: req.Duration,
+							},
+						},
+					}
+				}
+			}
+		}
+
+		if media == nil {
+			fid, err := fileid.DecodeFileID(req.Voice)
+			if err == nil {
+				media = &tg.InputMediaDocument{
+					ID: &tg.InputDocument{
+						ID:            fid.ID,
+						AccessHash:    fid.AccessHash,
+						FileReference: fid.FileReference,
+					},
+				}
+			} else {
+				if !strings.HasPrefix(req.Voice, "http://") && !strings.HasPrefix(req.Voice, "https://") {
+					return nil, fmt.Errorf("invalid file_id or voice path: %s", req.Voice)
+				}
+				media = &tg.InputMediaDocumentExternal{
+					URL: req.Voice,
+				}
+			}
 		}
 	}
 
@@ -1803,12 +1998,20 @@ func (b *BotInstance) SendVoice(ctx context.Context, req *converter.SendVoiceReq
 	sendReq := &tg.MessagesSendMediaRequest{
 		Peer:       peer,
 		Media:      media,
-		Message:    req.Caption,
+		Message:    caption,
+		Entities:   entities,
 		RandomID:   randomID.Int64(),
 		Noforwards: req.ProtectContent,
 	}
 
-	updates, err := b.raw.MessagesSendMedia(ctx, sendReq)
+	if len(req.ReplyMarkup) > 0 {
+		markup, _ := converter.ParseReplyMarkup(req.ReplyMarkup)
+		sendReq.ReplyMarkup = markup
+	}
+
+	sendReq.ReplyTo = createReplyTo(req.ReplyParameters, req.ReplyToMessageID, req.MessageThreadID)
+
+	updates, err := b.sendMedia(ctx, req.BusinessConnectionID, sendReq)
 	if err != nil {
 		return nil, fmt.Errorf("mtproto send voice: %w", err)
 	}
@@ -1818,7 +2021,7 @@ func (b *BotInstance) SendVoice(ctx context.Context, req *converter.SendVoiceReq
 		From:      b.GetMe(),
 		Chat:      converter.Chat{ID: req.ChatID},
 		Date:      int(time.Now().Unix()),
-		Caption:   req.Caption,
+		Caption:   caption,
 	}, nil
 }
 
@@ -1852,9 +2055,74 @@ func (b *BotInstance) SendVideoNote(ctx context.Context, req *converter.SendVide
 				},
 			},
 		}
+	} else if strings.HasPrefix(req.VideoNote, "attach://") {
+		return nil, fmt.Errorf("attachment %q not found in request files", req.VideoNote)
+	} else if isMediaURL(req.VideoNote) {
+		inputFile, _, _, err := b.uploadFromURL(ctx, req.VideoNote)
+		if err == nil {
+			media = &tg.InputMediaUploadedDocument{
+				File:     inputFile,
+				MimeType: "video/mp4",
+				Attributes: []tg.DocumentAttributeClass{
+					&tg.DocumentAttributeVideo{
+						RoundMessage: true,
+						Duration:     float64(req.Duration),
+						W:            req.Length,
+						H:            req.Length,
+					},
+				},
+			}
+		} else {
+			media = &tg.InputMediaDocumentExternal{
+				URL: req.VideoNote,
+			}
+		}
 	} else {
-		media = &tg.InputMediaDocumentExternal{
-			URL: req.VideoNote,
+		localPath := strings.TrimPrefix(req.VideoNote, "file://")
+		if (strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../")) {
+			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
+				data, err := os.ReadFile(localPath)
+				if err == nil && len(data) > 0 {
+					fileName := filepath.Base(localPath)
+					u := uploader.NewUploader(b.raw)
+					inputFile, err := u.FromBytes(ctx, fileName, data)
+					if err != nil {
+						return nil, fmt.Errorf("upload local video note bytes: %w", err)
+					}
+					media = &tg.InputMediaUploadedDocument{
+						File:     inputFile,
+						MimeType: "video/mp4",
+						Attributes: []tg.DocumentAttributeClass{
+							&tg.DocumentAttributeVideo{
+								RoundMessage: true,
+								Duration:     float64(req.Duration),
+								W:            req.Length,
+								H:            req.Length,
+							},
+						},
+					}
+				}
+			}
+		}
+
+		if media == nil {
+			fid, err := fileid.DecodeFileID(req.VideoNote)
+			if err == nil {
+				media = &tg.InputMediaDocument{
+					ID: &tg.InputDocument{
+						ID:            fid.ID,
+						AccessHash:    fid.AccessHash,
+						FileReference: fid.FileReference,
+					},
+				}
+			} else {
+				if !strings.HasPrefix(req.VideoNote, "http://") && !strings.HasPrefix(req.VideoNote, "https://") {
+					return nil, fmt.Errorf("invalid file_id or video note path: %s", req.VideoNote)
+				}
+				media = &tg.InputMediaDocumentExternal{
+					URL: req.VideoNote,
+				}
+			}
 		}
 	}
 
@@ -1866,7 +2134,14 @@ func (b *BotInstance) SendVideoNote(ctx context.Context, req *converter.SendVide
 		Noforwards: req.ProtectContent,
 	}
 
-	updates, err := b.raw.MessagesSendMedia(ctx, sendReq)
+	if len(req.ReplyMarkup) > 0 {
+		markup, _ := converter.ParseReplyMarkup(req.ReplyMarkup)
+		sendReq.ReplyMarkup = markup
+	}
+
+	sendReq.ReplyTo = createReplyTo(req.ReplyParameters, req.ReplyToMessageID, req.MessageThreadID)
+
+	updates, err := b.sendMedia(ctx, req.BusinessConnectionID, sendReq)
 	if err != nil {
 		return nil, fmt.Errorf("mtproto send video note: %w", err)
 	}
@@ -2199,23 +2474,83 @@ func (b *BotInstance) SendAudio(ctx context.Context, req *converter.SendAudioReq
 				},
 			},
 		}
-	} else if strings.HasPrefix(req.Audio, "http://") || strings.HasPrefix(req.Audio, "https://") {
-		media = &tg.InputMediaDocumentExternal{
-			URL: req.Audio,
-		}
-	} else {
-		fid, err := fileid.DecodeFileID(req.Audio)
-		if err == nil {
+	} else if strings.HasPrefix(req.Audio, "attach://") {
+		return nil, fmt.Errorf("attachment %q not found in request files", req.Audio)
+	} else if isMediaURL(req.Audio) {
+		if cachedDoc := b.getDocCache(ctx, req.Audio); cachedDoc != nil {
 			media = &tg.InputMediaDocument{
-				ID: &tg.InputDocument{
-					ID:            fid.ID,
-					AccessHash:    fid.AccessHash,
-					FileReference: fid.FileReference,
-				},
+				ID: cachedDoc,
 			}
 		} else {
-			media = &tg.InputMediaDocumentExternal{
-				URL: req.Audio,
+			inputFile, mimeType, fileName, err := b.uploadFromURL(ctx, req.Audio)
+			if err == nil {
+				if fileName == "" {
+					fileName = "audio.mp3"
+				}
+				media = &tg.InputMediaUploadedDocument{
+					File:     inputFile,
+					MimeType: mimeType,
+					Attributes: []tg.DocumentAttributeClass{
+						&tg.DocumentAttributeAudio{
+							Duration:  req.Duration,
+							Title:     req.Title,
+							Performer: req.Performer,
+						},
+						&tg.DocumentAttributeFilename{FileName: fileName},
+					},
+				}
+			} else {
+				media = &tg.InputMediaDocumentExternal{
+					URL: req.Audio,
+				}
+			}
+		}
+	} else {
+		// Check local file if path exists
+		localPath := strings.TrimPrefix(req.Audio, "file://")
+		if (strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../")) {
+			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
+				data, err := os.ReadFile(localPath)
+				if err == nil && len(data) > 0 {
+					fileName := filepath.Base(localPath)
+					u := uploader.NewUploader(b.raw)
+					inputFile, err := u.FromBytes(ctx, fileName, data)
+					if err != nil {
+						return nil, fmt.Errorf("upload local audio bytes: %w", err)
+					}
+					media = &tg.InputMediaUploadedDocument{
+						File:     inputFile,
+						MimeType: "audio/mpeg",
+						Attributes: []tg.DocumentAttributeClass{
+							&tg.DocumentAttributeAudio{
+								Duration:  req.Duration,
+								Title:     req.Title,
+								Performer: req.Performer,
+							},
+							&tg.DocumentAttributeFilename{FileName: fileName},
+						},
+					}
+				}
+			}
+		}
+
+		if media == nil {
+			fid, err := fileid.DecodeFileID(req.Audio)
+			if err == nil {
+				media = &tg.InputMediaDocument{
+					ID: &tg.InputDocument{
+						ID:            fid.ID,
+						AccessHash:    fid.AccessHash,
+						FileReference: fid.FileReference,
+					},
+				}
+			} else {
+				if !strings.HasPrefix(req.Audio, "http://") && !strings.HasPrefix(req.Audio, "https://") {
+					return nil, fmt.Errorf("invalid file_id or audio path: %s", req.Audio)
+				}
+				media = &tg.InputMediaDocumentExternal{
+					URL: req.Audio,
+				}
 			}
 		}
 	}
@@ -2235,7 +2570,9 @@ func (b *BotInstance) SendAudio(ctx context.Context, req *converter.SendAudioReq
 		sendReq.ReplyMarkup = markup
 	}
 
-	updates, err := b.raw.MessagesSendMedia(ctx, sendReq)
+	sendReq.ReplyTo = createReplyTo(req.ReplyParameters, req.ReplyToMessageID, req.MessageThreadID)
+
+	updates, err := b.sendMedia(ctx, req.BusinessConnectionID, sendReq)
 	if err != nil {
 		return nil, fmt.Errorf("mtproto send audio: %w", err)
 	}
@@ -2271,23 +2608,58 @@ func (b *BotInstance) SendSticker(ctx context.Context, req *converter.SendSticke
 			File:     inputFile,
 			MimeType: "image/webp",
 		}
-	} else if strings.HasPrefix(req.Sticker, "http://") || strings.HasPrefix(req.Sticker, "https://") {
-		media = &tg.InputMediaDocumentExternal{
-			URL: req.Sticker,
-		}
-	} else {
-		fid, err := fileid.DecodeFileID(req.Sticker)
+	} else if strings.HasPrefix(req.Sticker, "attach://") {
+		return nil, fmt.Errorf("attachment %q not found in request files", req.Sticker)
+	} else if isMediaURL(req.Sticker) {
+		inputFile, _, _, err := b.uploadFromURL(ctx, req.Sticker)
 		if err == nil {
-			media = &tg.InputMediaDocument{
-				ID: &tg.InputDocument{
-					ID:            fid.ID,
-					AccessHash:    fid.AccessHash,
-					FileReference: fid.FileReference,
-				},
+			media = &tg.InputMediaUploadedDocument{
+				File:     inputFile,
+				MimeType: "image/webp",
 			}
 		} else {
 			media = &tg.InputMediaDocumentExternal{
 				URL: req.Sticker,
+			}
+		}
+	} else {
+		// Check local file if path exists
+		localPath := strings.TrimPrefix(req.Sticker, "file://")
+		if (strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../")) {
+			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
+				data, err := os.ReadFile(localPath)
+				if err == nil && len(data) > 0 {
+					fileName := filepath.Base(localPath)
+					u := uploader.NewUploader(b.raw)
+					inputFile, err := u.FromBytes(ctx, fileName, data)
+					if err != nil {
+						return nil, fmt.Errorf("upload local sticker bytes: %w", err)
+					}
+					media = &tg.InputMediaUploadedDocument{
+						File:     inputFile,
+						MimeType: "image/webp",
+					}
+				}
+			}
+		}
+
+		if media == nil {
+			fid, err := fileid.DecodeFileID(req.Sticker)
+			if err == nil {
+				media = &tg.InputMediaDocument{
+					ID: &tg.InputDocument{
+						ID:            fid.ID,
+						AccessHash:    fid.AccessHash,
+						FileReference: fid.FileReference,
+					},
+				}
+			} else {
+				if !strings.HasPrefix(req.Sticker, "http://") && !strings.HasPrefix(req.Sticker, "https://") {
+					return nil, fmt.Errorf("invalid file_id or sticker path: %s", req.Sticker)
+				}
+				media = &tg.InputMediaDocumentExternal{
+					URL: req.Sticker,
+				}
 			}
 		}
 	}
@@ -2305,7 +2677,9 @@ func (b *BotInstance) SendSticker(ctx context.Context, req *converter.SendSticke
 		sendReq.ReplyMarkup = markup
 	}
 
-	updates, err := b.raw.MessagesSendMedia(ctx, sendReq)
+	sendReq.ReplyTo = createReplyTo(req.ReplyParameters, req.ReplyToMessageID, req.MessageThreadID)
+
+	updates, err := b.sendMedia(ctx, req.BusinessConnectionID, sendReq)
 	if err != nil {
 		return nil, fmt.Errorf("mtproto send sticker: %w", err)
 	}
@@ -2360,6 +2734,8 @@ func (b *BotInstance) SendAnimation(ctx context.Context, req *converter.SendAnim
 				},
 			},
 		}
+	} else if strings.HasPrefix(req.Animation, "attach://") {
+		return nil, fmt.Errorf("attachment %q not found in request files", req.Animation)
 	} else if isMediaURL(req.Animation) {
 		if cachedDoc := b.getDocCache(ctx, req.Animation); cachedDoc != nil {
 			media = &tg.InputMediaDocument{
@@ -2388,18 +2764,52 @@ func (b *BotInstance) SendAnimation(ctx context.Context, req *converter.SendAnim
 			}
 		}
 	} else {
-		fid, err := fileid.DecodeFileID(req.Animation)
-		if err == nil {
-			media = &tg.InputMediaDocument{
-				ID: &tg.InputDocument{
-					ID:            fid.ID,
-					AccessHash:    fid.AccessHash,
-					FileReference: fid.FileReference,
-				},
+		// Check local file if path exists
+		localPath := strings.TrimPrefix(req.Animation, "file://")
+		if (strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../")) {
+			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
+				data, err := os.ReadFile(localPath)
+				if err == nil && len(data) > 0 {
+					fileName := filepath.Base(localPath)
+					u := uploader.NewUploader(b.raw)
+					inputFile, err := u.FromBytes(ctx, fileName, data)
+					if err != nil {
+						return nil, fmt.Errorf("upload local animation bytes: %w", err)
+					}
+					media = &tg.InputMediaUploadedDocument{
+						File:     inputFile,
+						MimeType: "video/mp4",
+						Attributes: []tg.DocumentAttributeClass{
+							&tg.DocumentAttributeAnimated{},
+							&tg.DocumentAttributeVideo{
+								Duration: float64(req.Duration),
+								W:        req.Width,
+								H:        req.Height,
+							},
+							&tg.DocumentAttributeFilename{FileName: fileName},
+						},
+					}
+				}
 			}
-		} else {
-			media = &tg.InputMediaDocumentExternal{
-				URL: req.Animation,
+		}
+
+		if media == nil {
+			fid, err := fileid.DecodeFileID(req.Animation)
+			if err == nil {
+				media = &tg.InputMediaDocument{
+					ID: &tg.InputDocument{
+						ID:            fid.ID,
+						AccessHash:    fid.AccessHash,
+						FileReference: fid.FileReference,
+					},
+				}
+			} else {
+				if !strings.HasPrefix(req.Animation, "http://") && !strings.HasPrefix(req.Animation, "https://") {
+					return nil, fmt.Errorf("invalid file_id or animation path: %s", req.Animation)
+				}
+				media = &tg.InputMediaDocumentExternal{
+					URL: req.Animation,
+				}
 			}
 		}
 	}
@@ -2419,7 +2829,9 @@ func (b *BotInstance) SendAnimation(ctx context.Context, req *converter.SendAnim
 		sendReq.ReplyMarkup = markup
 	}
 
-	updates, err := b.raw.MessagesSendMedia(ctx, sendReq)
+	sendReq.ReplyTo = createReplyTo(req.ReplyParameters, req.ReplyToMessageID, req.MessageThreadID)
+
+	updates, err := b.sendMedia(ctx, req.BusinessConnectionID, sendReq)
 	if err != nil {
 		return nil, fmt.Errorf("mtproto send animation: %w", err)
 	}
@@ -2630,6 +3042,20 @@ func (b *BotInstance) resolveInputSingleMedia(ctx context.Context, peer tg.Input
 				Spoiler: item.HasSpoiler,
 			}, nil
 		}
+
+		localPath := strings.TrimPrefix(item.Media, "file://")
+		if (strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../")) {
+			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
+				if fileData, err := os.ReadFile(localPath); err == nil && len(fileData) > 0 {
+					if files == nil {
+						files = make(map[string][]byte)
+						fileNames = make(map[string]string)
+					}
+					files[item.Media] = fileData
+					fileNames[item.Media] = filepath.Base(localPath)
+				}
+			}
+		}
 	}
 
 	// 3. If it's a photo URL, try MessagesUploadMedia with PhotoExternal first
@@ -2786,10 +3212,16 @@ func (b *BotInstance) resolveInputSingleMedia(ctx context.Context, peer tg.Input
 		var ok bool
 		data, ok = files[attachKey]
 		if !ok {
+			data, ok = files[item.Media]
+		}
+		if !ok {
 			return nil, fmt.Errorf("attachment %q not found in request files", attachKey)
 		}
 		if fileNames != nil {
 			fileName = fileNames[attachKey]
+			if fileName == "" {
+				fileName = fileNames[item.Media]
+			}
 		}
 	}
 
