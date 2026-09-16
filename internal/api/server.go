@@ -3,7 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"mime/multipart"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -730,6 +734,111 @@ func (s *Server) handleAnswerCallbackQuery(ctx *fasthttp.RequestCtx, bot *botman
 	s.respondOK(ctx, ok)
 }
 
+// ExtractFileFromRequest retrieves uploaded file data and filename from fasthttp.RequestCtx.
+// It handles:
+// 1. Direct multipart field matching fieldName (e.g. name="document")
+// 2. attach://<name> referenced multipart part (standard Bot API multipart protocol used by grammY, aiogram, etc.)
+// 3. Fallback to multipart part if only 1 file is attached or matching fieldName
+// 4. Local filesystem path in local mode (/path/to/file, ./path, or file:///path/to/file)
+func ExtractFileFromRequest(ctx *fasthttp.RequestCtx, fieldName, fieldValue string) ([]byte, string) {
+	// 1. Check direct fieldName (e.g. ctx.FormFile("document"))
+	if fh, err := ctx.FormFile(fieldName); err == nil && fh != nil {
+		if f, err := fh.Open(); err == nil {
+			data, err := io.ReadAll(f)
+			_ = f.Close()
+			if err == nil && len(data) > 0 {
+				return data, fh.Filename
+			}
+		}
+	}
+
+	// 2. Check attach://<id> if fieldValue has it
+	if strings.HasPrefix(fieldValue, "attach://") {
+		attachID := strings.TrimPrefix(fieldValue, "attach://")
+		if fh, err := ctx.FormFile(attachID); err == nil && fh != nil {
+			if f, err := fh.Open(); err == nil {
+				data, err := io.ReadAll(f)
+				_ = f.Close()
+				if err == nil && len(data) > 0 {
+					return data, fh.Filename
+				}
+			}
+		}
+	}
+
+	// 3. Check MultipartForm map
+	if mf, err := ctx.MultipartForm(); err == nil && mf != nil {
+		if strings.HasPrefix(fieldValue, "attach://") {
+			attachID := strings.TrimPrefix(fieldValue, "attach://")
+			if fhs, ok := mf.File[attachID]; ok && len(fhs) > 0 {
+				if f, err := fhs[0].Open(); err == nil {
+					data, err := io.ReadAll(f)
+					_ = f.Close()
+					if err == nil && len(data) > 0 {
+						return data, fhs[0].Filename
+					}
+				}
+			}
+		}
+
+		if fhs, ok := mf.File[fieldName]; ok && len(fhs) > 0 {
+			if f, err := fhs[0].Open(); err == nil {
+				data, err := io.ReadAll(f)
+				_ = f.Close()
+				if err == nil && len(data) > 0 {
+					return data, fhs[0].Filename
+				}
+			}
+		}
+
+		// If there is only 1 file in total in the multipart form, use it
+		var allHeaders []*multipart.FileHeader
+		for _, headers := range mf.File {
+			allHeaders = append(allHeaders, headers...)
+		}
+		if len(allHeaders) == 1 {
+			if f, err := allHeaders[0].Open(); err == nil {
+				data, err := io.ReadAll(f)
+				_ = f.Close()
+				if err == nil && len(data) > 0 {
+					return data, allHeaders[0].Filename
+				}
+			}
+		}
+
+		// If multiple files, check non-thumbnail file
+		var nonThumb []*multipart.FileHeader
+		for k, headers := range mf.File {
+			if k != "thumb" && k != "thumbnail" {
+				nonThumb = append(nonThumb, headers...)
+			}
+		}
+		if len(nonThumb) == 1 {
+			if f, err := nonThumb[0].Open(); err == nil {
+				data, err := io.ReadAll(f)
+				_ = f.Close()
+				if err == nil && len(data) > 0 {
+					return data, nonThumb[0].Filename
+				}
+			}
+		}
+	}
+
+	// 4. Local file path (Bot API local mode or file:// URL)
+	filePath := strings.TrimPrefix(fieldValue, "file://")
+	if !strings.HasPrefix(fieldValue, "http://") && !strings.HasPrefix(fieldValue, "https://") && !strings.HasPrefix(fieldValue, "attach://") {
+		if (strings.HasPrefix(filePath, "/") || strings.HasPrefix(filePath, "./") || strings.HasPrefix(filePath, "../")) && len(filePath) > 1 {
+			if info, err := os.Stat(filePath); err == nil && !info.IsDir() {
+				if data, err := os.ReadFile(filePath); err == nil && len(data) > 0 {
+					return data, filepath.Base(filePath)
+				}
+			}
+		}
+	}
+
+	return nil, ""
+}
+
 func (s *Server) handleSendPhoto(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
 	var req converter.SendPhotoRequest
 	if err := bindRequest(ctx, &req); err != nil {
@@ -737,20 +846,20 @@ func (s *Server) handleSendPhoto(ctx *fasthttp.RequestCtx, bot *botmanager.BotIn
 		return
 	}
 
-	if fh, err := ctx.FormFile("photo"); err == nil && fh != nil {
-		f, err := fh.Open()
-		if err == nil {
-			data, err := io.ReadAll(f)
-			_ = f.Close()
-			if err == nil {
-				req.PhotoData = data
-				req.PhotoFileName = fh.Filename
-			}
+	if data, filename := ExtractFileFromRequest(ctx, "photo", req.Photo); len(data) > 0 {
+		req.PhotoData = data
+		if req.PhotoFileName == "" {
+			req.PhotoFileName = filename
 		}
 	}
 
 	if req.ChatID == 0 || (req.Photo == "" && len(req.PhotoData) == 0) {
 		s.respondError(ctx, 400, "Bad Request: chat_id and photo are required")
+		return
+	}
+
+	if strings.HasPrefix(req.Photo, "attach://") && len(req.PhotoData) == 0 {
+		s.respondError(ctx, 400, fmt.Sprintf("Bad Request: attachment %q not found in request files", req.Photo))
 		return
 	}
 
@@ -773,20 +882,20 @@ func (s *Server) handleSendVideo(ctx *fasthttp.RequestCtx, bot *botmanager.BotIn
 		return
 	}
 
-	if fh, err := ctx.FormFile("video"); err == nil && fh != nil {
-		f, err := fh.Open()
-		if err == nil {
-			data, err := io.ReadAll(f)
-			_ = f.Close()
-			if err == nil {
-				req.VideoData = data
-				req.VideoFileName = fh.Filename
-			}
+	if data, filename := ExtractFileFromRequest(ctx, "video", req.Video); len(data) > 0 {
+		req.VideoData = data
+		if req.VideoFileName == "" {
+			req.VideoFileName = filename
 		}
 	}
 
 	if req.ChatID == 0 || (req.Video == "" && len(req.VideoData) == 0) {
 		s.respondError(ctx, 400, "Bad Request: chat_id and video are required")
+		return
+	}
+
+	if strings.HasPrefix(req.Video, "attach://") && len(req.VideoData) == 0 {
+		s.respondError(ctx, 400, fmt.Sprintf("Bad Request: attachment %q not found in request files", req.Video))
 		return
 	}
 
@@ -809,20 +918,20 @@ func (s *Server) handleSendDocument(ctx *fasthttp.RequestCtx, bot *botmanager.Bo
 		return
 	}
 
-	if fh, err := ctx.FormFile("document"); err == nil && fh != nil {
-		f, err := fh.Open()
-		if err == nil {
-			data, err := io.ReadAll(f)
-			_ = f.Close()
-			if err == nil {
-				req.DocumentData = data
-				req.DocumentFileName = fh.Filename
-			}
+	if data, filename := ExtractFileFromRequest(ctx, "document", req.Document); len(data) > 0 {
+		req.DocumentData = data
+		if req.DocumentFileName == "" {
+			req.DocumentFileName = filename
 		}
 	}
 
 	if req.ChatID == 0 || (req.Document == "" && len(req.DocumentData) == 0) {
 		s.respondError(ctx, 400, "Bad Request: chat_id and document are required")
+		return
+	}
+
+	if strings.HasPrefix(req.Document, "attach://") && len(req.DocumentData) == 0 {
+		s.respondError(ctx, 400, fmt.Sprintf("Bad Request: attachment %q not found in request files", req.Document))
 		return
 	}
 
@@ -845,20 +954,20 @@ func (s *Server) handleSendVoice(ctx *fasthttp.RequestCtx, bot *botmanager.BotIn
 		return
 	}
 
-	if fh, err := ctx.FormFile("voice"); err == nil && fh != nil {
-		f, err := fh.Open()
-		if err == nil {
-			data, err := io.ReadAll(f)
-			_ = f.Close()
-			if err == nil {
-				req.VoiceData = data
-				req.VoiceFileName = fh.Filename
-			}
+	if data, filename := ExtractFileFromRequest(ctx, "voice", req.Voice); len(data) > 0 {
+		req.VoiceData = data
+		if req.VoiceFileName == "" {
+			req.VoiceFileName = filename
 		}
 	}
 
 	if req.ChatID == 0 || (req.Voice == "" && len(req.VoiceData) == 0) {
 		s.respondError(ctx, 400, "Bad Request: chat_id and voice are required")
+		return
+	}
+
+	if strings.HasPrefix(req.Voice, "attach://") && len(req.VoiceData) == 0 {
+		s.respondError(ctx, 400, fmt.Sprintf("Bad Request: attachment %q not found in request files", req.Voice))
 		return
 	}
 
@@ -881,20 +990,20 @@ func (s *Server) handleSendVideoNote(ctx *fasthttp.RequestCtx, bot *botmanager.B
 		return
 	}
 
-	if fh, err := ctx.FormFile("video_note"); err == nil && fh != nil {
-		f, err := fh.Open()
-		if err == nil {
-			data, err := io.ReadAll(f)
-			_ = f.Close()
-			if err == nil {
-				req.VideoNoteData = data
-				req.VideoNoteFileName = fh.Filename
-			}
+	if data, filename := ExtractFileFromRequest(ctx, "video_note", req.VideoNote); len(data) > 0 {
+		req.VideoNoteData = data
+		if req.VideoNoteFileName == "" {
+			req.VideoNoteFileName = filename
 		}
 	}
 
 	if req.ChatID == 0 || (req.VideoNote == "" && len(req.VideoNoteData) == 0) {
 		s.respondError(ctx, 400, "Bad Request: chat_id and video_note are required")
+		return
+	}
+
+	if strings.HasPrefix(req.VideoNote, "attach://") && len(req.VideoNoteData) == 0 {
+		s.respondError(ctx, 400, fmt.Sprintf("Bad Request: attachment %q not found in request files", req.VideoNote))
 		return
 	}
 
@@ -917,20 +1026,20 @@ func (s *Server) handleSendAudio(ctx *fasthttp.RequestCtx, bot *botmanager.BotIn
 		return
 	}
 
-	if fh, err := ctx.FormFile("audio"); err == nil && fh != nil {
-		f, err := fh.Open()
-		if err == nil {
-			data, err := io.ReadAll(f)
-			_ = f.Close()
-			if err == nil {
-				req.AudioData = data
-				req.AudioFileName = fh.Filename
-			}
+	if data, filename := ExtractFileFromRequest(ctx, "audio", req.Audio); len(data) > 0 {
+		req.AudioData = data
+		if req.AudioFileName == "" {
+			req.AudioFileName = filename
 		}
 	}
 
 	if req.ChatID == 0 || (req.Audio == "" && len(req.AudioData) == 0) {
 		s.respondError(ctx, 400, "Bad Request: chat_id and audio are required")
+		return
+	}
+
+	if strings.HasPrefix(req.Audio, "attach://") && len(req.AudioData) == 0 {
+		s.respondError(ctx, 400, fmt.Sprintf("Bad Request: attachment %q not found in request files", req.Audio))
 		return
 	}
 
@@ -953,20 +1062,20 @@ func (s *Server) handleSendSticker(ctx *fasthttp.RequestCtx, bot *botmanager.Bot
 		return
 	}
 
-	if fh, err := ctx.FormFile("sticker"); err == nil && fh != nil {
-		f, err := fh.Open()
-		if err == nil {
-			data, err := io.ReadAll(f)
-			_ = f.Close()
-			if err == nil {
-				req.StickerData = data
-				req.StickerFileName = fh.Filename
-			}
+	if data, filename := ExtractFileFromRequest(ctx, "sticker", req.Sticker); len(data) > 0 {
+		req.StickerData = data
+		if req.StickerFileName == "" {
+			req.StickerFileName = filename
 		}
 	}
 
 	if req.ChatID == 0 || (req.Sticker == "" && len(req.StickerData) == 0) {
 		s.respondError(ctx, 400, "Bad Request: chat_id and sticker are required")
+		return
+	}
+
+	if strings.HasPrefix(req.Sticker, "attach://") && len(req.StickerData) == 0 {
+		s.respondError(ctx, 400, fmt.Sprintf("Bad Request: attachment %q not found in request files", req.Sticker))
 		return
 	}
 
@@ -989,20 +1098,20 @@ func (s *Server) handleSendAnimation(ctx *fasthttp.RequestCtx, bot *botmanager.B
 		return
 	}
 
-	if fh, err := ctx.FormFile("animation"); err == nil && fh != nil {
-		f, err := fh.Open()
-		if err == nil {
-			data, err := io.ReadAll(f)
-			_ = f.Close()
-			if err == nil {
-				req.AnimationData = data
-				req.AnimationFileName = fh.Filename
-			}
+	if data, filename := ExtractFileFromRequest(ctx, "animation", req.Animation); len(data) > 0 {
+		req.AnimationData = data
+		if req.AnimationFileName == "" {
+			req.AnimationFileName = filename
 		}
 	}
 
 	if req.ChatID == 0 || (req.Animation == "" && len(req.AnimationData) == 0) {
 		s.respondError(ctx, 400, "Bad Request: chat_id and animation are required")
+		return
+	}
+
+	if strings.HasPrefix(req.Animation, "attach://") && len(req.AnimationData) == 0 {
+		s.respondError(ctx, 400, fmt.Sprintf("Bad Request: attachment %q not found in request files", req.Animation))
 		return
 	}
 
