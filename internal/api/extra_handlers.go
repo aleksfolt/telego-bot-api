@@ -1416,6 +1416,11 @@ func (s *Server) handleUploadStickerFile(ctx *fasthttp.RequestCtx, bot *botmanag
 		s.respondError(ctx, 400, "Bad Request: "+err.Error())
 		return
 	}
+
+	if data, _ := ExtractFileFromRequest(ctx, "sticker", req.Sticker); len(data) > 0 {
+		req.StickerData = data
+	}
+
 	c, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
@@ -1586,6 +1591,11 @@ func (s *Server) handleSetStickerSetThumbnail(ctx *fasthttp.RequestCtx, bot *bot
 		s.respondError(ctx, 400, "Bad Request: "+err.Error())
 		return
 	}
+
+	if data, _ := ExtractFileFromRequest(ctx, "thumbnail", req.Thumbnail); len(data) > 0 {
+		req.ThumbnailData = data
+	}
+
 	c, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 

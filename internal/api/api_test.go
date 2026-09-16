@@ -186,5 +186,85 @@ func TestExtractFileFromRequest(t *testing.T) {
 		assert.Nil(t, data)
 		assert.Empty(t, filename)
 	}
+
+	// 5. Test grammY exact raw multipart stream (lowercase content-disposition, no spaces, unquoted filename)
+	{
+		boundary := "----------1234567890"
+		rawBody := "--" + boundary + "\r\n" +
+			"content-disposition:form-data;name=\"chat_id\"\r\n\r\n" +
+			"12345\r\n" +
+			"--" + boundary + "\r\n" +
+			"content-disposition:form-data;name=\"document\"\r\n\r\n" +
+			"attach://ihxt8gcjii1n6hln\r\n" +
+			"--" + boundary + "\r\n" +
+			"content-disposition:form-data;name=\"ihxt8gcjii1n6hln\";filename=test.zip\r\n" +
+			"content-type:application/octet-stream\r\n\r\n" +
+			"ZIP_CONTENT_HERE\r\n" +
+			"--" + boundary + "--\r\n"
+
+		ctx := &fasthttp.RequestCtx{}
+		ctx.Request.Header.SetContentType("multipart/form-data; boundary=" + boundary)
+		ctx.Request.SetBody([]byte(rawBody))
+
+		data, filename := api.ExtractFileFromRequest(ctx, "document", "attach://ihxt8gcjii1n6hln")
+		t.Logf("Case 5 result - data: %q, filename: %q", string(data), filename)
+		assert.Equal(t, "test.zip", filename)
+		assert.Equal(t, []byte("ZIP_CONTENT_HERE"), data)
+	}
+
+	// 6. Test grammY with COLON in unquoted filename: filename=8907195935:7026718333.zip
+	{
+		boundary := "----------1234567890"
+		rawBody := "--" + boundary + "\r\n" +
+			"content-disposition:form-data;name=\"chat_id\"\r\n\r\n" +
+			"12345\r\n" +
+			"--" + boundary + "\r\n" +
+			"content-disposition:form-data;name=\"document\"\r\n\r\n" +
+			"attach://ihxt8gcjii1n6hln\r\n" +
+			"--" + boundary + "\r\n" +
+			"content-disposition:form-data;name=\"ihxt8gcjii1n6hln\";filename=8907195935:7026718333.zip\r\n" +
+			"content-type:application/octet-stream\r\n\r\n" +
+			"ZIP_WITH_COLON_HERE\r\n" +
+			"--" + boundary + "--\r\n"
+
+		ctx := &fasthttp.RequestCtx{}
+		ctx.Request.Header.SetContentType("multipart/form-data; boundary=" + boundary)
+		ctx.Request.SetBody([]byte(rawBody))
+
+		data, filename := api.ExtractFileFromRequest(ctx, "document", "attach://ihxt8gcjii1n6hln")
+		assert.Equal(t, "8907195935:7026718333.zip", filename)
+		assert.Equal(t, []byte("ZIP_WITH_COLON_HERE"), data)
+	}
+
+	// 7. Test ParseContentDisposition edge cases
+	{
+		name, fn := api.ParseContentDisposition("form-data; name=\"doc\"; filename=8907195935:7026718333.zip")
+		assert.Equal(t, "doc", name)
+		assert.Equal(t, "8907195935:7026718333.zip", fn)
+
+		name, fn = api.ParseContentDisposition("form-data; filename=\"cool:file.txt\"; name=\"upload\"")
+		assert.Equal(t, "upload", name)
+		assert.Equal(t, "cool:file.txt", fn)
+
+		name, fn = api.ParseContentDisposition("form-data; name=test; filename=archive.tar.gz; extra=1")
+		assert.Equal(t, "test", name)
+		assert.Equal(t, "archive.tar.gz", fn)
+	}
+}
+
+func getKeys(m map[string][]string) []string {
+	var res []string
+	for k := range m {
+		res = append(res, k)
+	}
+	return res
+}
+
+func getFileKeys(m map[string][]*multipart.FileHeader) []string {
+	var res []string
+	for k := range m {
+		res = append(res, k)
+	}
+	return res
 }
 

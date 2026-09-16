@@ -1,8 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"strconv"
 	"strings"
 
@@ -49,6 +52,26 @@ func bindRequest(ctx *fasthttp.RequestCtx, target interface{}) error {
 		for k, vals := range mf.Value {
 			if len(vals) > 0 {
 				data[k] = parseArgValue(k, vals[0])
+			}
+		}
+	}
+
+	// Fallback for multipart/form-data values if raw boundary exists
+	if boundary := ctx.Request.Header.MultipartFormBoundary(); len(boundary) > 0 {
+		mr := multipart.NewReader(bytes.NewReader(body), string(boundary))
+		for {
+			p, err := mr.NextPart()
+			if err != nil {
+				break
+			}
+			cd := p.Header.Get("Content-Disposition")
+			pName, pFilename := ParseContentDisposition(cd)
+			if pName != "" && pFilename == "" {
+				if _, exists := data[pName]; !exists {
+					if valBytes, err := io.ReadAll(p); err == nil {
+						data[pName] = parseArgValue(pName, string(valBytes))
+					}
+				}
 			}
 		}
 	}
