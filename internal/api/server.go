@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -734,13 +735,69 @@ func (s *Server) handleAnswerCallbackQuery(ctx *fasthttp.RequestCtx, bot *botman
 	s.respondOK(ctx, ok)
 }
 
+// ParseContentDispositionParam extracts a parameter value (e.g. name or filename) from Content-Disposition header.
+// It handles unquoted values with colons, spaces, and other characters, as well as quoted strings.
+// This is critical because some Bot API clients (such as grammY) generate unquoted filenames like:
+// content-disposition:form-data;name="...";filename=12345:67890.zip
+// which standard Go mime.ParseMediaType rejects due to RFC 2045 tspecials.
+func ParseContentDispositionParam(cd, key string) string {
+	lowerCD := strings.ToLower(cd)
+	searchKey := strings.ToLower(key) + "="
+	start := 0
+	for {
+		idx := strings.Index(lowerCD[start:], searchKey)
+		if idx == -1 {
+			return ""
+		}
+		pos := start + idx
+		// Check that pos is preceded by parameter boundary: pos == 0, or previous char is ';', ' ', '\t'
+		if pos == 0 || lowerCD[pos-1] == ';' || lowerCD[pos-1] == ' ' || lowerCD[pos-1] == '\t' {
+			val := cd[pos+len(searchKey):]
+			if len(val) > 0 && val[0] == '"' {
+				val = val[1:]
+				if end := strings.IndexByte(val, '"'); end != -1 {
+					return val[:end]
+				}
+				return val
+			}
+			if end := strings.IndexAny(val, ";\r\n"); end != -1 {
+				return strings.TrimSpace(val[:end])
+			}
+			return strings.TrimSpace(val)
+		}
+		start = pos + 1
+	}
+}
+
+// ParseContentDisposition extracts name and filename from a Content-Disposition header.
+func ParseContentDisposition(cd string) (name, filename string) {
+	name = ParseContentDispositionParam(cd, "name")
+	filename = ParseContentDispositionParam(cd, "filename")
+	if filename == "" {
+		filename = ParseContentDispositionParam(cd, "filename*")
+		if strings.Contains(filename, "''") {
+			parts := strings.SplitN(filename, "''", 2)
+			if len(parts) == 2 {
+				filename = parts[1]
+			}
+		}
+	}
+	return name, filename
+}
+
 // ExtractFileFromRequest retrieves uploaded file data and filename from fasthttp.RequestCtx.
 // It handles:
 // 1. Direct multipart field matching fieldName (e.g. name="document")
 // 2. attach://<name> referenced multipart part (standard Bot API multipart protocol used by grammY, aiogram, etc.)
 // 3. Fallback to multipart part if only 1 file is attached or matching fieldName
-// 4. Local filesystem path in local mode (/path/to/file, ./path, or file:///path/to/file)
+// 4. Raw multipart stream fallback (handles unquoted colons/special characters in filename like grammY)
+// 5. Local filesystem path in local mode (/path/to/file, ./path, or file:///path/to/file)
 func ExtractFileFromRequest(ctx *fasthttp.RequestCtx, fieldName, fieldValue string) ([]byte, string) {
+	attachID := ""
+	if strings.HasPrefix(fieldValue, "attach://") {
+		attachID = strings.TrimPrefix(fieldValue, "attach://")
+	}
+
 	// 1. Check direct fieldName (e.g. ctx.FormFile("document"))
 	if fh, err := ctx.FormFile(fieldName); err == nil && fh != nil {
 		if f, err := fh.Open(); err == nil {
@@ -753,8 +810,7 @@ func ExtractFileFromRequest(ctx *fasthttp.RequestCtx, fieldName, fieldValue stri
 	}
 
 	// 2. Check attach://<id> if fieldValue has it
-	if strings.HasPrefix(fieldValue, "attach://") {
-		attachID := strings.TrimPrefix(fieldValue, "attach://")
+	if attachID != "" {
 		if fh, err := ctx.FormFile(attachID); err == nil && fh != nil {
 			if f, err := fh.Open(); err == nil {
 				data, err := io.ReadAll(f)
@@ -768,8 +824,7 @@ func ExtractFileFromRequest(ctx *fasthttp.RequestCtx, fieldName, fieldValue stri
 
 	// 3. Check MultipartForm map
 	if mf, err := ctx.MultipartForm(); err == nil && mf != nil {
-		if strings.HasPrefix(fieldValue, "attach://") {
-			attachID := strings.TrimPrefix(fieldValue, "attach://")
+		if attachID != "" {
 			if fhs, ok := mf.File[attachID]; ok && len(fhs) > 0 {
 				if f, err := fhs[0].Open(); err == nil {
 					data, err := io.ReadAll(f)
@@ -824,7 +879,57 @@ func ExtractFileFromRequest(ctx *fasthttp.RequestCtx, fieldName, fieldValue stri
 		}
 	}
 
-	// 4. Local file path (Bot API local mode or file:// URL)
+	// 4. Raw multipart stream fallback (handles unquoted colons/special characters in filename like grammY)
+	boundary := ctx.Request.Header.MultipartFormBoundary()
+	if len(boundary) > 0 {
+		mr := multipart.NewReader(bytes.NewReader(ctx.PostBody()), string(boundary))
+		var fallbackData []byte
+		var fallbackFilename string
+		var fallbackCount int
+
+		for {
+			p, err := mr.NextPart()
+			if err != nil {
+				break
+			}
+			cd := p.Header.Get("Content-Disposition")
+			pName, pFilename := ParseContentDisposition(cd)
+			if pName == "" && pFilename == "" {
+				continue
+			}
+
+			// Direct match by attachID or fieldName
+			if attachID != "" {
+				if pName == attachID {
+					data, err := io.ReadAll(p)
+					if err == nil && len(data) > 0 {
+						return data, pFilename
+					}
+				}
+			} else if fieldName != "" && pName == fieldName {
+				data, err := io.ReadAll(p)
+				if err == nil && len(data) > 0 && !strings.HasPrefix(string(data), "attach://") {
+					return data, pFilename
+				}
+			}
+
+			// Track files for fallback if only 1 file part exists
+			if pFilename != "" && pName != "thumb" && pName != "thumbnail" {
+				data, err := io.ReadAll(p)
+				if err == nil && len(data) > 0 {
+					fallbackData = data
+					fallbackFilename = pFilename
+					fallbackCount++
+				}
+			}
+		}
+
+		if fallbackCount == 1 && len(fallbackData) > 0 {
+			return fallbackData, fallbackFilename
+		}
+	}
+
+	// 5. Local file path (Bot API local mode or file:// URL)
 	filePath := strings.TrimPrefix(fieldValue, "file://")
 	if !strings.HasPrefix(fieldValue, "http://") && !strings.HasPrefix(fieldValue, "https://") && !strings.HasPrefix(fieldValue, "attach://") {
 		if (strings.HasPrefix(filePath, "/") || strings.HasPrefix(filePath, "./") || strings.HasPrefix(filePath, "../")) && len(filePath) > 1 {
@@ -1304,6 +1409,30 @@ func (s *Server) handleSendMediaGroup(ctx *fasthttp.RequestCtx, bot *botmanager.
 		}
 	}
 
+	if boundary := ctx.Request.Header.MultipartFormBoundary(); len(boundary) > 0 {
+		mr := multipart.NewReader(bytes.NewReader(ctx.PostBody()), string(boundary))
+		if req.Files == nil {
+			req.Files = make(map[string][]byte)
+			req.FileNames = make(map[string]string)
+		}
+		for {
+			p, err := mr.NextPart()
+			if err != nil {
+				break
+			}
+			cd := p.Header.Get("Content-Disposition")
+			pName, pFilename := ParseContentDisposition(cd)
+			if pName != "" {
+				if _, exists := req.Files[pName]; !exists {
+					if data, err := io.ReadAll(p); err == nil && len(data) > 0 {
+						req.Files[pName] = data
+						req.FileNames[pName] = pFilename
+					}
+				}
+			}
+		}
+	}
+
 	if req.ChatID == 0 || len(req.Media) == 0 {
 		s.respondError(ctx, 400, "Bad Request: chat_id and media are required")
 		return
@@ -1383,6 +1512,30 @@ func (s *Server) handlePostStory(ctx *fasthttp.RequestCtx, bot *botmanager.BotIn
 			_ = file.Close()
 			if readErr == nil {
 				req.Files[name], req.FileNames[name] = data, fhs[0].Filename
+			}
+		}
+	}
+
+	if boundary := ctx.Request.Header.MultipartFormBoundary(); len(boundary) > 0 {
+		mr := multipart.NewReader(bytes.NewReader(ctx.PostBody()), string(boundary))
+		if req.Files == nil {
+			req.Files = make(map[string][]byte)
+			req.FileNames = make(map[string]string)
+		}
+		for {
+			p, err := mr.NextPart()
+			if err != nil {
+				break
+			}
+			cd := p.Header.Get("Content-Disposition")
+			pName, pFilename := ParseContentDisposition(cd)
+			if pName != "" {
+				if _, exists := req.Files[pName]; !exists {
+					if data, err := io.ReadAll(p); err == nil && len(data) > 0 {
+						req.Files[pName] = data
+						req.FileNames[pName] = pFilename
+					}
+				}
 			}
 		}
 	}
