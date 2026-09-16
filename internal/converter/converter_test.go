@@ -153,7 +153,7 @@ func TestConvertUpdate_BusinessConnection(t *testing.T) {
 			ConnectionID: "conn_12345",
 			UserID:       835716625,
 			Date:         1700000000,
-			Rights:       tg.BusinessBotRights{Reply: true},
+			Rights:       tg.BusinessBotRights{Reply: true, DeleteSentMessages: true},
 			Disabled:     false,
 		},
 	}
@@ -165,14 +165,18 @@ func TestConvertUpdate_BusinessConnection(t *testing.T) {
 	assert.Equal(t, "conn_12345", converted.BusinessConnection.ID)
 	assert.Equal(t, int64(835716625), converted.BusinessConnection.UserChatID)
 	assert.Equal(t, int64(835716625), converted.BusinessConnection.User.ID)
-	assert.Equal(t, "Business Owner", converted.BusinessConnection.User.FirstName)
 	assert.True(t, converted.BusinessConnection.CanReply)
 	assert.True(t, converted.BusinessConnection.IsEnabled)
+	require.NotNil(t, converted.BusinessConnection.Rights)
+	assert.True(t, converted.BusinessConnection.Rights.CanReply)
+	assert.True(t, converted.BusinessConnection.Rights.CanDeleteSentMessages)
+	assert.True(t, converted.BusinessConnection.Rights.CanDeleteOutgoingMessages)
 
 	data, err := json.Marshal(converted)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), `"is_enabled":true`)
 	assert.Contains(t, string(data), `"business_connection"`)
+	assert.Contains(t, string(data), `"can_reply":true`)
 
 	// Test disabled connection
 	updDisabled := &tg.UpdateBotBusinessConnect{

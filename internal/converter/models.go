@@ -24,6 +24,8 @@ type User struct {
 	FirstName               string `json:"first_name"`
 	LastName                string `json:"last_name,omitempty"`
 	Username                string `json:"username,omitempty"`
+	LanguageCode            string `json:"language_code,omitempty"`
+	IsPremium               bool   `json:"is_premium,omitempty"`
 	CanJoinGroups           bool   `json:"can_join_groups,omitempty"`
 	CanReadAllGroupMessages bool   `json:"can_read_all_group_messages,omitempty"`
 	SupportsInlineQueries   bool   `json:"supports_inline_queries,omitempty"`
@@ -188,14 +190,34 @@ type MessageID struct {
 	MessageID int64 `json:"message_id"`
 }
 
+// BusinessBotRights describes the permissions granted to a connected business bot.
+type BusinessBotRights struct {
+	CanReply                   bool `json:"can_reply,omitempty"`
+	CanReadMessages            bool `json:"can_read_messages,omitempty"`
+	CanDeleteSentMessages      bool `json:"can_delete_sent_messages,omitempty"`
+	CanDeleteOutgoingMessages  bool `json:"can_delete_outgoing_messages,omitempty"`
+	CanDeleteAllMessages       bool `json:"can_delete_all_messages,omitempty"`
+	CanEditName                bool `json:"can_edit_name,omitempty"`
+	CanEditBio                 bool `json:"can_edit_bio,omitempty"`
+	CanEditProfilePhoto        bool `json:"can_edit_profile_photo,omitempty"`
+	CanEditUsername            bool `json:"can_edit_username,omitempty"`
+	CanChangeGiftSettings      bool `json:"can_change_gift_settings,omitempty"`
+	CanViewGiftsAndStars       bool `json:"can_view_gifts_and_stars,omitempty"`
+	CanConvertGiftsToStars     bool `json:"can_convert_gifts_to_stars,omitempty"`
+	CanTransferAndUpgradeGifts bool `json:"can_transfer_and_upgrade_gifts,omitempty"`
+	CanTransferStars           bool `json:"can_transfer_stars,omitempty"`
+	CanManageStories           bool `json:"can_manage_stories,omitempty"`
+}
+
 // BusinessConnection describes the connection of the bot with a business account.
 type BusinessConnection struct {
-	ID         string `json:"id"`
-	User       User   `json:"user"`
-	UserChatID int64  `json:"user_chat_id"`
-	Date       int    `json:"date"`
-	CanReply   bool   `json:"can_reply"`
-	IsEnabled  bool   `json:"is_enabled"`
+	ID         string             `json:"id"`
+	User       User               `json:"user"`
+	UserChatID int64              `json:"user_chat_id"`
+	Date       int                `json:"date"`
+	CanReply   bool               `json:"can_reply"`
+	IsEnabled  bool               `json:"is_enabled"`
+	Rights     *BusinessBotRights `json:"rights,omitempty"`
 }
 
 // BusinessMessagesDeleted represents service messages about the deletion of messages in a connected business account.
