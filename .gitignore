@@ -1,0 +1,31 @@
+# Binaries
+telego-server
+telego-server.*
+telego-bot-api-server
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# Environment & local secrets
+.env
+.env.*
+!*.example
+
+# Docs & logs
+HANDOFF.md
+*.log
+*.tmp
