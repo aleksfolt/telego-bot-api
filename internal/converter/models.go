@@ -47,6 +47,7 @@ type Chat struct {
 	Username  string `json:"username,omitempty"`
 	FirstName string `json:"first_name,omitempty"`
 	LastName  string `json:"last_name,omitempty"`
+	IsForum   bool   `json:"is_forum,omitempty"`
 }
 
 // MessageEntity represents an entity in a message (e.g. bold, link, mention).
@@ -148,6 +149,8 @@ type MessageAutoDeleteTimerChanged struct {
 // Message represents a Telegram message.
 type Message struct {
 	MessageID                     int64                          `json:"message_id"`
+	MessageThreadID               int64                          `json:"message_thread_id,omitempty"`
+	IsTopicMessage                bool                           `json:"is_topic_message,omitempty"`
 	BusinessConnectionID          string                         `json:"business_connection_id,omitempty"`
 	From                          *User                          `json:"from,omitempty"`
 	Chat                          Chat                           `json:"chat"`
@@ -169,7 +172,13 @@ type Message struct {
 	Contact                       *Contact                       `json:"contact,omitempty"`
 	Poll                          *Poll                          `json:"poll,omitempty"`
 	Dice                          *Dice                          `json:"dice,omitempty"`
+	MediaGroupID                  string                         `json:"media_group_id,omitempty"`
+	AuthorSignature               string                         `json:"author_signature,omitempty"`
+	EditDate                      int                            `json:"edit_date,omitempty"`
+	HasProtectedContent           bool                           `json:"has_protected_content,omitempty"`
+	ShowCaptionAboveMedia         bool                           `json:"show_caption_above_media,omitempty"`
 	HasMediaSpoiler               bool                           `json:"has_media_spoiler,omitempty"`
+	ViaBot                        *User                          `json:"via_bot,omitempty"`
 	NewChatMembers                []User                         `json:"new_chat_members,omitempty"`
 	LeftChatMember                *User                          `json:"left_chat_member,omitempty"`
 	NewChatTitle                  string                         `json:"new_chat_title,omitempty"`
@@ -339,6 +348,13 @@ type ChatBoostUpdated struct {
 	Boost ChatBoost `json:"boost"`
 }
 
+type ChatBoostRemoved struct {
+	Chat       Chat            `json:"chat"`
+	BoostID    string          `json:"boost_id"`
+	RemoveDate int             `json:"remove_date"`
+	Source     ChatBoostSource `json:"source"`
+}
+
 type MessageReactionUpdated struct {
 	Chat        Chat           `json:"chat"`
 	MessageID   int64          `json:"message_id"`
@@ -388,6 +404,7 @@ type Update struct {
 	MyChatMember            *ChatMemberUpdated           `json:"my_chat_member,omitempty"`
 	ChatMember              *ChatMemberUpdated           `json:"chat_member,omitempty"`
 	ChatBoost               *ChatBoostUpdated            `json:"chat_boost,omitempty"`
+	RemovedChatBoost        *ChatBoostRemoved            `json:"removed_chat_boost,omitempty"`
 	MessageReaction         *MessageReactionUpdated      `json:"message_reaction,omitempty"`
 	MessageReactionCount    *MessageReactionCountUpdated `json:"message_reaction_count,omitempty"`
 	PurchasedPaidMedia      *PaidMediaPurchased          `json:"purchased_paid_media,omitempty"`
