@@ -36,38 +36,38 @@ func Load() *Config {
 		MTProtoDebug:  false,
 	}
 
-	if val := os.Getenv("TELEGRAM_API_ID"); val != "" {
+	if val := getEnv("TELEGO_API_ID", "TELEGRAM_API_ID", "API_ID"); val != "" {
 		if id, err := strconv.Atoi(val); err == nil {
 			cfg.AppID = id
 		}
 	}
-	if val := os.Getenv("TELEGRAM_API_HASH"); val != "" {
+	if val := getEnv("TELEGO_API_HASH", "TELEGRAM_API_HASH", "API_HASH"); val != "" {
 		cfg.AppHash = val
 	}
-	if val := os.Getenv("HTTP_ADDR"); val != "" {
+	if val := getEnv("TELEGO_HTTP_ADDR", "HTTP_ADDR"); val != "" {
 		cfg.HTTPAddr = val
 	}
-	if val := os.Getenv("OUTBOUND_IPS"); val != "" {
+	if val := getEnv("TELEGO_OUTBOUND_IPS", "OUTBOUND_IPS"); val != "" {
 		cfg.OutboundIPs = strings.Split(val, ",")
 	}
-	if val := os.Getenv("REDIS_ADDR"); val != "" {
+	if val := getEnv("TELEGO_REDIS_ADDR", "REDIS_ADDR"); val != "" {
 		cfg.RedisAddr = val
 	}
-	if val := os.Getenv("REDIS_PASSWORD"); val != "" {
+	if val := getEnv("TELEGO_REDIS_PASSWORD", "TELEGO_REDIS_PASS", "REDIS_PASSWORD", "REDIS_PASS"); val != "" {
 		cfg.RedisPassword = val
 	}
-	if val := os.Getenv("REDIS_DB"); val != "" {
+	if val := getEnv("TELEGO_REDIS_DB", "REDIS_DB"); val != "" {
 		if db, err := strconv.Atoi(val); err == nil {
 			cfg.RedisDB = db
 		}
 	}
-	if val := os.Getenv("LOG_LEVEL"); val != "" {
+	if val := getEnv("TELEGO_LOG_LEVEL", "LOG_LEVEL"); val != "" {
 		cfg.LogLevel = val
 	}
-	if val := os.Getenv("LOG_FORMAT"); val != "" {
+	if val := getEnv("TELEGO_LOG_FORMAT", "LOG_FORMAT"); val != "" {
 		cfg.LogFormat = val
 	}
-	if val := os.Getenv("TELEGO_MTPROTO_DEBUG"); val == "true" || val == "1" {
+	if val := getEnv("TELEGO_MTPROTO_DEBUG", "MTPROTO_DEBUG"); val == "true" || val == "1" {
 		cfg.MTProtoDebug = true
 	}
 
@@ -90,3 +90,13 @@ func Load() *Config {
 
 	return cfg
 }
+
+func getEnv(keys ...string) string {
+	for _, k := range keys {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
