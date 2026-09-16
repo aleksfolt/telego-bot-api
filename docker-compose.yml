@@ -1,0 +1,27 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  telego-bot-api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - redis
+    ports:
+      - "8082:8082"
+    environment:
+      - TELEGO_API_ID=${TELEGO_API_ID:-0}
+      - TELEGO_API_HASH=${TELEGO_API_HASH:-}
+      - TELEGO_HTTP_ADDR=0.0.0.0:8082
+      - TELEGO_REDIS_ADDR=redis:6379
+      - TELEGO_LOG_LEVEL=info
+      - TELEGO_LOG_FORMAT=console
+
+volumes:
+  redis_data:
