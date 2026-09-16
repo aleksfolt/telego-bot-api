@@ -10,6 +10,8 @@ import (
 
 	"telego-bot-api/internal/botmanager"
 	"telego-bot-api/internal/converter"
+	"telego-bot-api/internal/metrics"
+	"telego-bot-api/internal/webhook"
 
 	"github.com/valyala/fasthttp"
 	"go.uber.org/zap"
@@ -19,15 +21,17 @@ import (
 type Server struct {
 	addr       string
 	botManager *botmanager.Manager
+	dispatcher *webhook.Dispatcher
 	logger     *zap.Logger
 	fastServer *fasthttp.Server
 }
 
 // NewServer creates a new API HTTP server.
-func NewServer(addr string, botManager *botmanager.Manager, logger *zap.Logger) *Server {
+func NewServer(addr string, botManager *botmanager.Manager, dispatcher *webhook.Dispatcher, logger *zap.Logger) *Server {
 	s := &Server{
 		addr:       addr,
 		botManager: botManager,
+		dispatcher: dispatcher,
 		logger:     logger,
 	}
 	s.fastServer = &fasthttp.Server{
@@ -68,14 +72,45 @@ func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	// Health & status endpoint for observability
+	// Prometheus metrics endpoint for monitoring & Grafana
+	if path == "/metrics" {
+		ctx.SetContentType("text/plain; version=0.0.4; charset=utf-8")
+		active, hibernated := s.botManager.GetBotCounts()
+		queueSize := 0
+		if s.dispatcher != nil {
+			queueSize = s.dispatcher.QueueSize()
+		}
+		metrics.DefaultRegistry.WritePrometheus(ctx, active, hibernated, queueSize)
+		return
+	}
+
+	// Deep Health & status endpoint for observability
 	if path == "/status" || path == "/health" {
 		ctx.SetContentType("application/json")
 		status := s.botManager.GetBotsStatus()
+		active, hibernated := s.botManager.GetBotCounts()
+
+		redisStatus := "connected"
+		pingCtx, pingCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		if err := s.botManager.PingRedis(pingCtx); err != nil {
+			redisStatus = "error: " + err.Error()
+		}
+		pingCancel()
+
+		queueSize := 0
+		if s.dispatcher != nil {
+			queueSize = s.dispatcher.QueueSize()
+		}
+
 		body, _ := json.Marshal(map[string]any{
-			"ok":         true,
-			"total_bots": len(status),
-			"bots":       status,
+			"ok":              true,
+			"status":          "healthy",
+			"redis":           redisStatus,
+			"total_bots":      len(status),
+			"active_bots":     active,
+			"hibernated_bots": hibernated,
+			"webhook_queue":   queueSize,
+			"bots":            status,
 		})
 		ctx.SetBody(body)
 		return
@@ -101,6 +136,9 @@ func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 	defer func() {
 		status := ctx.Response.StatusCode()
 		latency := time.Since(start)
+		metrics.DefaultRegistry.IncRequests(method, status)
+		metrics.DefaultRegistry.ObserveDuration(method, latency)
+
 		fields := []zap.Field{
 			zap.String("method", method),
 			zap.Int("status", status),

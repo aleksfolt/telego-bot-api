@@ -16,6 +16,7 @@ import (
 
 	"telego-bot-api/internal/converter"
 	"telego-bot-api/internal/logging"
+	"telego-bot-api/internal/metrics"
 	"telego-bot-api/internal/netpool"
 	"telego-bot-api/internal/peer"
 	"telego-bot-api/internal/storage"
@@ -331,7 +332,22 @@ func (b *BotInstance) Handle(ctx context.Context, u tg.UpdatesClass) error {
 		kind := updateKind(upd)
 		sender := describeUpdateSender(upd)
 		if url != "" {
-			b.dispatcher.Enqueue(url, secret, upd)
+			b.dispatcher.EnqueueTask(&webhook.Task{
+				BotID:       botID,
+				URL:         url,
+				SecretToken: secret,
+				Update:      upd,
+				OnSuccess: func(bID int64, uID int) {
+					ackCtx, ackCancel := context.WithTimeout(context.Background(), 2*time.Second)
+					defer ackCancel()
+					_ = b.redisStore.AckUpdates(ackCtx, bID, uID)
+				},
+				OnError: func(bID int64, err error) {
+					errCtx, errCancel := context.WithTimeout(context.Background(), 2*time.Second)
+					defer errCancel()
+					_ = b.redisStore.UpdateWebhookDeliveryError(errCtx, b.token, err.Error())
+				},
+			})
 			b.logger.Info("Update received -> Webhook",
 				zap.Int("update_id", upd.UpdateID),
 				zap.String("type", kind),
@@ -345,6 +361,8 @@ func (b *BotInstance) Handle(ctx context.Context, u tg.UpdatesClass) error {
 			)
 		}
 	}
+
+	metrics.DefaultRegistry.IncUpdatesReceived(len(extraUpdates))
 
 	// Notify long-polling listeners
 	select {
@@ -598,13 +616,31 @@ func (b *BotInstance) DeleteWebhook(ctx context.Context, dropPending bool) error
 func (b *BotInstance) GetWebhookInfo(ctx context.Context) (*converter.WebhookInfo, error) {
 	b.mu.RLock()
 	url := b.webhookURL
+	botID := b.botID
 	b.mu.RUnlock()
 
-	return &converter.WebhookInfo{
+	pendingCount := 0
+	if botID != 0 {
+		pendingCount, _ = b.redisStore.PendingUpdatesCount(ctx, botID)
+	}
+
+	info := &converter.WebhookInfo{
 		URL:                  url,
 		HasCustomCertificate: false,
-		PendingUpdateCount:   0,
-	}, nil
+		PendingUpdateCount:   pendingCount,
+		MaxConnections:       40,
+	}
+
+	if wh, err := b.redisStore.GetWebhook(ctx, b.token); err == nil && wh != nil {
+		info.LastErrorDate = int(wh.LastErrorDate)
+		info.LastErrorMessage = wh.LastErrorMessage
+		if wh.MaxConnections > 0 {
+			info.MaxConnections = wh.MaxConnections
+		}
+		info.AllowedUpdates = wh.AllowedUpdates
+	}
+
+	return info, nil
 }
 
 // HasWebhook returns true if a webhook URL is currently configured for the bot.

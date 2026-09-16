@@ -30,7 +30,7 @@ func TestServerRouting(t *testing.T) {
 	defer dispatcher.Stop()
 
 	bm := botmanager.NewManager(cfg, rdb, dispatcher, logger)
-	srv := api.NewServer(cfg.HTTPAddr, bm, logger)
+	srv := api.NewServer(cfg.HTTPAddr, bm, dispatcher, logger)
 
 	// 1. Invalid path (no /bot prefix)
 	{
@@ -74,6 +74,18 @@ func TestServerRouting(t *testing.T) {
 		err := json.Unmarshal(ctx.Response.Body(), &res)
 		require.NoError(t, err)
 		assert.Equal(t, true, res["ok"])
+		assert.Equal(t, "healthy", res["status"])
+	}
+
+	// 4. /metrics endpoint
+	{
+		ctx := &fasthttp.RequestCtx{}
+		ctx.Request.SetRequestURI("/metrics")
+		srv.HandleRequest(ctx)
+
+		assert.Equal(t, 200, ctx.Response.StatusCode())
+		assert.Contains(t, string(ctx.Response.Body()), "telego_uptime_seconds")
+		assert.Contains(t, string(ctx.Response.Body()), "telego_bots_total")
 	}
 }
 

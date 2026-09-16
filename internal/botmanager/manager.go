@@ -237,3 +237,26 @@ func (m *Manager) GetBotsStatus() []BotStatus {
 	return res
 }
 
+// GetBotCounts returns current counts of (active, hibernated) bots.
+func (m *Manager) GetBotCounts() (active int, hibernated int) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, b := range m.bots {
+		if b.IsHibernated() {
+			hibernated++
+		} else {
+			active++
+		}
+	}
+	return active, hibernated
+}
+
+// PingRedis tests connectivity to Redis store.
+func (m *Manager) PingRedis(ctx context.Context) error {
+	if m.redisStore == nil {
+		return fmt.Errorf("redis store not initialized")
+	}
+	return m.redisStore.Ping(ctx)
+}
+
+

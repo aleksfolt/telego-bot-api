@@ -40,11 +40,13 @@ func updateIDKey(botID int64) string {
 
 // WebhookData stores webhook configuration for a bot.
 type WebhookData struct {
-	URL            string    `json:"url"`
-	SecretToken    string    `json:"secret_token,omitempty"`
-	MaxConnections int       `json:"max_connections,omitempty"`
-	AllowedUpdates []string  `json:"allowed_updates,omitempty"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	URL              string    `json:"url"`
+	SecretToken      string    `json:"secret_token,omitempty"`
+	MaxConnections   int       `json:"max_connections,omitempty"`
+	AllowedUpdates   []string  `json:"allowed_updates,omitempty"`
+	LastErrorDate    int64     `json:"last_error_date,omitempty"`
+	LastErrorMessage string    `json:"last_error_message,omitempty"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // RedisStore provides persistent storage for bot sessions, webhooks, and peer caches.
@@ -121,6 +123,27 @@ func (r *RedisStore) GetWebhook(ctx context.Context, token string) (*WebhookData
 // DeleteWebhook removes webhook configuration.
 func (r *RedisStore) DeleteWebhook(ctx context.Context, token string) error {
 	return r.client.Del(ctx, fmt.Sprintf("telego:webhook:%s", token)).Err()
+}
+
+// UpdateWebhookDeliveryError records the last webhook delivery failure.
+func (r *RedisStore) UpdateWebhookDeliveryError(ctx context.Context, token string, errMsg string) error {
+	wh, err := r.GetWebhook(ctx, token)
+	if err != nil || wh == nil {
+		return err
+	}
+	wh.LastErrorDate = time.Now().Unix()
+	wh.LastErrorMessage = errMsg
+	return r.SaveWebhook(ctx, token, wh)
+}
+
+// PendingUpdatesCount returns the number of pending updates in the Redis Stream.
+func (r *RedisStore) PendingUpdatesCount(ctx context.Context, botID int64) (int, error) {
+	stream := updateStreamKey(botID)
+	length, err := r.client.XLen(ctx, stream).Result()
+	if err != nil {
+		return 0, err
+	}
+	return int(length), nil
 }
 
 // SavePeer stores chat_id -> access_hash and peer_type in Redis.
