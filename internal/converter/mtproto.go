@@ -335,6 +335,7 @@ func (c *MTProtoConverter) ConvertUpdate(updateID int, u tg.UpdateClass, entitie
 				Date:       conn.Date,
 				CanReply:   conn.Rights.Reply,
 				IsEnabled:  !conn.Disabled,
+				Rights:     ConvertBusinessBotRights(conn.Rights),
 			},
 		}, nil
 
@@ -695,11 +696,13 @@ func NewEntityContext(users []tg.UserClass, chats []tg.ChatClass) *EntityContext
 	for _, u := range users {
 		if user, ok := u.(*tg.User); ok {
 			ctx.users[user.ID] = &User{
-				ID:        user.ID,
-				IsBot:     user.Bot,
-				FirstName: user.FirstName,
-				LastName:  user.LastName,
-				Username:  user.Username,
+				ID:           user.ID,
+				IsBot:        user.Bot,
+				FirstName:    user.FirstName,
+				LastName:     user.LastName,
+				Username:     user.Username,
+				LanguageCode: user.LangCode,
+				IsPremium:    user.Premium,
 			}
 		}
 	}
@@ -1111,5 +1114,26 @@ func (c *MTProtoConverter) ConvertShortChatMessage(updateID int, upd *tg.UpdateS
 	return &Update{
 		UpdateID: updateID,
 		Message:  msg,
+	}
+}
+
+// ConvertBusinessBotRights converts MTProto tg.BusinessBotRights to Bot API BusinessBotRights.
+func ConvertBusinessBotRights(r tg.BusinessBotRights) *BusinessBotRights {
+	return &BusinessBotRights{
+		CanReply:                   r.Reply,
+		CanReadMessages:            r.ReadMessages,
+		CanDeleteSentMessages:      r.DeleteSentMessages,
+		CanDeleteOutgoingMessages:  r.DeleteSentMessages,
+		CanDeleteAllMessages:       r.DeleteReceivedMessages,
+		CanEditName:                r.EditName,
+		CanEditBio:                 r.EditBio,
+		CanEditProfilePhoto:        r.EditProfilePhoto,
+		CanEditUsername:            r.EditUsername,
+		CanChangeGiftSettings:      r.ChangeGiftSettings,
+		CanViewGiftsAndStars:       r.ViewGifts,
+		CanConvertGiftsToStars:     r.SellGifts,
+		CanTransferAndUpgradeGifts: r.TransferAndUpgradeGifts,
+		CanTransferStars:           r.TransferStars,
+		CanManageStories:           r.ManageStories,
 	}
 }

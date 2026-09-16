@@ -820,6 +820,7 @@ func (b *BotInstance) GetBusinessConnection(ctx context.Context, connectionID st
 					Date:       conn.Date,
 					CanReply:   conn.Rights.Reply,
 					IsEnabled:  !conn.Disabled,
+					Rights:     converter.ConvertBusinessBotRights(conn.Rights),
 				}
 
 				b.busConnsMu.Lock()
