@@ -720,6 +720,7 @@ func NewEntityContext(users []tg.UserClass, chats []tg.ChatClass) *EntityContext
 				Type:     chatType,
 				Title:    chat.Title,
 				Username: chat.Username,
+				IsForum:  chat.Forum,
 			}
 		case *tg.Chat:
 			botApiChatID := -chat.ID
@@ -842,6 +843,32 @@ func (c *MTProtoConverter) ConvertMessage(m tg.MessageClass, entities *EntityCon
 		Chat:           chat,
 		Date:           msg.Date,
 		ReplyToMessage: replyToMsg,
+	}
+	if msg.GroupedID != 0 {
+		result.MediaGroupID = strconv.FormatInt(msg.GroupedID, 10)
+	}
+	if msg.EditDate != 0 {
+		result.EditDate = msg.EditDate
+	}
+	if msg.PostAuthor != "" {
+		result.AuthorSignature = msg.PostAuthor
+	}
+	if msg.Noforwards {
+		result.HasProtectedContent = true
+	}
+	if msg.InvertMedia {
+		result.ShowCaptionAboveMedia = true
+	}
+	if msg.ViaBotID != 0 {
+		result.ViaBot = &User{ID: msg.ViaBotID, IsBot: true}
+	}
+	if header, ok := msg.ReplyTo.(*tg.MessageReplyHeader); ok {
+		if header.ReplyToTopID != 0 {
+			result.MessageThreadID = int64(header.ReplyToTopID)
+		}
+		if header.ForumTopic {
+			result.IsTopicMessage = true
+		}
 	}
 	if msg.Media == nil {
 		result.Text = msg.Message
