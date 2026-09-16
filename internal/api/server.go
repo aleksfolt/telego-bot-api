@@ -477,12 +477,9 @@ func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 }
 
 func (s *Server) handleGetMe(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
-	user := bot.GetMe()
-	if user == nil {
-		c, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		user = bot.RefreshMe(c)
-	}
+	c, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	user := bot.GetOrRefreshMe(c)
 	if user == nil {
 		s.respondError(ctx, 500, "Bot profile not loaded yet")
 		return

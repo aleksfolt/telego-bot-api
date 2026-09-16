@@ -27,8 +27,14 @@ type User struct {
 	CanJoinGroups           bool   `json:"can_join_groups,omitempty"`
 	CanReadAllGroupMessages bool   `json:"can_read_all_group_messages,omitempty"`
 	SupportsInlineQueries   bool   `json:"supports_inline_queries,omitempty"`
-	CanConnectToBusiness    bool   `json:"can_connect_to_business,omitempty"`
+	CanConnectToBusiness    *bool  `json:"can_connect_to_business,omitempty"`
 	HasMainWebApp           bool   `json:"has_main_web_app,omitempty"`
+	CanManageBots           *bool  `json:"can_manage_bots,omitempty"`
+}
+
+// BoolPtr returns a pointer to the given bool.
+func BoolPtr(b bool) *bool {
+	return &b
 }
 
 // Chat represents a Telegram chat (private, group, supergroup, or channel).

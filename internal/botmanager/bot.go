@@ -45,10 +45,11 @@ type BotInstance struct {
 	redisStore *storage.RedisStore
 	logger     *zap.Logger
 
-	mu          sync.RWMutex
-	webhookURL  string
-	secretToken string
-	self        *converter.User
+	mu              sync.RWMutex
+	webhookURL      string
+	secretToken     string
+	self            *converter.User
+	lastSelfRefresh time.Time
 	// botID is the Telegram user ID of the bot, used as the Redis Stream key.
 	// Set to 0 until authentication completes.
 	botID        int64
@@ -157,6 +158,7 @@ func (b *BotInstance) Start(ctx context.Context) error {
 				user, ok := auth.User.AsNotEmpty()
 				if ok {
 					canConnectBusiness := user.GetBotBusiness() || os.Getenv("TELEGO_FORCE_BUSINESS_MODE") == "true"
+					canManageBots := user.GetBotCanManageBots()
 					b.mu.Lock()
 					b.botID = user.ID
 					b.self = &converter.User{
@@ -168,9 +170,11 @@ func (b *BotInstance) Start(ctx context.Context) error {
 						CanJoinGroups:           !user.GetBotNochats(),
 						CanReadAllGroupMessages: user.GetBotChatHistory(),
 						SupportsInlineQueries:   user.GetBotInlineGeo() || user.BotInlinePlaceholder != "",
-						CanConnectToBusiness:    canConnectBusiness,
+						CanConnectToBusiness:    converter.BoolPtr(canConnectBusiness),
 						HasMainWebApp:           user.GetBotAttachMenu(),
+						CanManageBots:           converter.BoolPtr(canManageBots),
 					}
+					b.lastSelfRefresh = time.Now()
 					b.converter.SetSelfUserID(user.ID)
 					b.mu.Unlock()
 					b.logger.Info("Bot connected and authorized",
@@ -722,7 +726,10 @@ func (b *BotInstance) RefreshMe(ctx context.Context) *converter.User {
 		if err == nil && len(users) > 0 {
 			if u, ok := users[0].AsNotEmpty(); ok {
 				canConnectBusiness := u.GetBotBusiness() || os.Getenv("TELEGO_FORCE_BUSINESS_MODE") == "true"
+				canManageBots := u.GetBotCanManageBots()
 				b.mu.Lock()
+				b.lastSelfRefresh = time.Now()
+				b.botID = u.ID
 				b.self = &converter.User{
 					ID:                      u.ID,
 					IsBot:                   true,
@@ -732,8 +739,9 @@ func (b *BotInstance) RefreshMe(ctx context.Context) *converter.User {
 					CanJoinGroups:           !u.GetBotNochats(),
 					CanReadAllGroupMessages: u.GetBotChatHistory(),
 					SupportsInlineQueries:   u.GetBotInlineGeo() || u.BotInlinePlaceholder != "",
-					CanConnectToBusiness:    canConnectBusiness,
+					CanConnectToBusiness:    converter.BoolPtr(canConnectBusiness),
 					HasMainWebApp:           u.GetBotAttachMenu(),
+					CanManageBots:           converter.BoolPtr(canManageBots),
 				}
 				b.converter.SetSelfUserID(u.ID)
 				b.mu.Unlock()
@@ -743,6 +751,21 @@ func (b *BotInstance) RefreshMe(ctx context.Context) *converter.User {
 				)
 			}
 		}
+	}
+	return b.GetMe()
+}
+
+// GetOrRefreshMe returns bot profile information, refreshing from MTProto if older than 10s,
+// or if can_connect_to_business is false/missing and >2s since last check (to pick up BotFather changes quickly).
+func (b *BotInstance) GetOrRefreshMe(ctx context.Context) *converter.User {
+	b.mu.RLock()
+	needRefresh := b.self == nil ||
+		time.Since(b.lastSelfRefresh) > 10*time.Second ||
+		((b.self.CanConnectToBusiness == nil || !*b.self.CanConnectToBusiness) && time.Since(b.lastSelfRefresh) > 2*time.Second)
+	b.mu.RUnlock()
+
+	if needRefresh && b.raw != nil {
+		return b.RefreshMe(ctx)
 	}
 	return b.GetMe()
 }
