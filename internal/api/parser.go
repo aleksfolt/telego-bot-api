@@ -112,6 +112,12 @@ func bindRequest(ctx *fasthttp.RequestCtx, target interface{}) error {
 			data["thumbnail"] = t
 		}
 	}
+	// Alias 'png_sticker' to 'sticker' for backward compatibility
+	if s, ok := data["png_sticker"]; ok {
+		if _, hasSticker := data["sticker"]; !hasSticker {
+			data["sticker"] = s
+		}
+	}
 
 	if len(data) == 0 && len(body) == 0 {
 		return nil

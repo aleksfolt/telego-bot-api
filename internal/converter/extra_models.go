@@ -263,26 +263,31 @@ type ForwardMessageRequest struct {
 	FromChatID          int64 `json:"from_chat_id"`
 	DisableNotification bool  `json:"disable_notification,omitempty"`
 	ProtectContent      bool  `json:"protect_content,omitempty"`
+	VideoStartTimestamp int   `json:"video_start_timestamp,omitempty"`
 	MessageID           int64 `json:"message_id"`
 }
 
 type ForwardMessagesRequest struct {
-	ChatID              int64   `json:"chat_id"`
-	MessageThreadID     int     `json:"message_thread_id,omitempty"`
-	FromChatID          int64   `json:"from_chat_id"`
-	MessageIDs          []int64 `json:"message_ids"`
-	DisableNotification bool    `json:"disable_notification,omitempty"`
-	ProtectContent      bool    `json:"protect_content,omitempty"`
+	ChatID                int64   `json:"chat_id"`
+	MessageThreadID       int     `json:"message_thread_id,omitempty"`
+	DirectMessagesTopicID int     `json:"direct_messages_topic_id,omitempty"`
+	FromChatID            int64   `json:"from_chat_id"`
+	MessageIDs            []int64 `json:"message_ids"`
+	DisableNotification   bool    `json:"disable_notification,omitempty"`
+	ProtectContent        bool    `json:"protect_content,omitempty"`
+	MessageEffectID       string  `json:"message_effect_id,omitempty"`
 }
 
 type CopyMessagesRequest struct {
-	ChatID              int64   `json:"chat_id"`
-	MessageThreadID     int     `json:"message_thread_id,omitempty"`
-	FromChatID          int64   `json:"from_chat_id"`
-	MessageIDs          []int64 `json:"message_ids"`
-	DisableNotification bool    `json:"disable_notification,omitempty"`
-	ProtectContent      bool    `json:"protect_content,omitempty"`
-	RemoveCaption       bool    `json:"remove_caption,omitempty"`
+	ChatID                int64   `json:"chat_id"`
+	MessageThreadID       int     `json:"message_thread_id,omitempty"`
+	DirectMessagesTopicID int     `json:"direct_messages_topic_id,omitempty"`
+	FromChatID            int64   `json:"from_chat_id"`
+	MessageIDs            []int64 `json:"message_ids"`
+	DisableNotification   bool    `json:"disable_notification,omitempty"`
+	ProtectContent        bool    `json:"protect_content,omitempty"`
+	RemoveCaption         bool    `json:"remove_caption,omitempty"`
+	MessageEffectID       string  `json:"message_effect_id,omitempty"`
 }
 
 type DeleteMessagesRequest struct {
@@ -323,6 +328,7 @@ type EditMessageLiveLocationRequest struct {
 	HorizontalAccuracy   float64         `json:"horizontal_accuracy,omitempty"`
 	Heading              int             `json:"heading,omitempty"`
 	ProximityAlertRadius int             `json:"proximity_alert_radius,omitempty"`
+	LivePeriod           int             `json:"live_period,omitempty"`
 	ReplyMarkup          json.RawMessage `json:"reply_markup,omitempty"`
 }
 
@@ -331,6 +337,9 @@ type StopMessageLiveLocationRequest struct {
 	ChatID               int64           `json:"chat_id,omitempty"`
 	MessageID            int64           `json:"message_id,omitempty"`
 	InlineMessageID      string          `json:"inline_message_id,omitempty"`
+	LivePeriod           int             `json:"live_period,omitempty"`
+	Heading              int             `json:"heading,omitempty"`
+	ProximityAlertRadius int             `json:"proximity_alert_radius,omitempty"`
 	ReplyMarkup          json.RawMessage `json:"reply_markup,omitempty"`
 }
 
@@ -372,6 +381,7 @@ type SendPollRequest struct {
 	MessageThreadID       int              `json:"message_thread_id,omitempty"`
 	Question              string           `json:"question"`
 	QuestionParseMode     string           `json:"question_parse_mode,omitempty"`
+	QuestionEntities      []MessageEntity  `json:"question_entities,omitempty"`
 	Options               json.RawMessage  `json:"options"`
 	IsAnonymous           *bool            `json:"is_anonymous,omitempty"`
 	Type                  string           `json:"type,omitempty"`
@@ -379,9 +389,12 @@ type SendPollRequest struct {
 	CorrectOptionID       int              `json:"correct_option_id,omitempty"`
 	Explanation           string           `json:"explanation,omitempty"`
 	ExplanationParseMode  string           `json:"explanation_parse_mode,omitempty"`
+	ExplanationEntities   []MessageEntity  `json:"explanation_entities,omitempty"`
 	OpenPeriod            int              `json:"open_period,omitempty"`
 	CloseDate             int              `json:"close_date,omitempty"`
 	IsClosed              bool             `json:"is_closed,omitempty"`
+	AllowAddingOptions    bool             `json:"allow_adding_options,omitempty"`
+	HideResultsUntilClose bool             `json:"hide_results_until_closes,omitempty"`
 	DisableNotification   bool             `json:"disable_notification,omitempty"`
 	ProtectContent        bool             `json:"protect_content,omitempty"`
 	ReplyParameters       *ReplyParameters `json:"reply_parameters,omitempty"`
@@ -409,6 +422,7 @@ type SendDiceRequest struct {
 type SetUserEmojiStatusRequest struct {
 	UserID                    int64  `json:"user_id"`
 	CustomEmojiID             string `json:"custom_emoji_id,omitempty"`
+	EmojiStatusCustomEmojiID  string `json:"emoji_status_custom_emoji_id,omitempty"`
 	EmojiStatusExpirationDate int    `json:"emoji_status_expiration_date,omitempty"`
 }
 
@@ -434,23 +448,27 @@ type RestrictChatMemberRequest struct {
 }
 
 type PromoteChatMemberRequest struct {
-	ChatID              int64 `json:"chat_id"`
-	UserID              int64 `json:"user_id"`
-	IsAnonymous         bool  `json:"is_anonymous,omitempty"`
-	CanManageChat       bool  `json:"can_manage_chat,omitempty"`
-	CanDeleteMessages   bool  `json:"can_delete_messages,omitempty"`
-	CanManageVideoChats bool  `json:"can_manage_video_chats,omitempty"`
-	CanRestrictMembers  bool  `json:"can_restrict_members,omitempty"`
-	CanPromoteMembers   bool  `json:"can_promote_members,omitempty"`
-	CanChangeInfo       bool  `json:"can_change_info,omitempty"`
-	CanInviteUsers      bool  `json:"can_invite_users,omitempty"`
-	CanPostStories      bool  `json:"can_post_stories,omitempty"`
-	CanEditStories      bool  `json:"can_edit_stories,omitempty"`
-	CanDeleteStories    bool  `json:"can_delete_stories,omitempty"`
-	CanPostMessages     bool  `json:"can_post_messages,omitempty"`
-	CanEditMessages     bool  `json:"can_edit_messages,omitempty"`
-	CanPinMessages      bool  `json:"can_pin_messages,omitempty"`
-	CanManageTopics     bool  `json:"can_manage_topics,omitempty"`
+	ChatID                   int64 `json:"chat_id"`
+	UserID                   int64 `json:"user_id"`
+	IsAnonymous              bool  `json:"is_anonymous,omitempty"`
+	CanManageChat            bool  `json:"can_manage_chat,omitempty"`
+	CanDeleteMessages        bool  `json:"can_delete_messages,omitempty"`
+	CanManageVideoChats      bool  `json:"can_manage_video_chats,omitempty"`
+	CanManageVoiceChats      bool  `json:"can_manage_voice_chats,omitempty"`
+	CanRestrictMembers       bool  `json:"can_restrict_members,omitempty"`
+	CanPromoteMembers        bool  `json:"can_promote_members,omitempty"`
+	CanChangeInfo            bool  `json:"can_change_info,omitempty"`
+	CanInviteUsers           bool  `json:"can_invite_users,omitempty"`
+	CanPostStories           bool  `json:"can_post_stories,omitempty"`
+	CanEditStories           bool  `json:"can_edit_stories,omitempty"`
+	CanDeleteStories         bool  `json:"can_delete_stories,omitempty"`
+	CanPostMessages          bool  `json:"can_post_messages,omitempty"`
+	CanEditMessages          bool  `json:"can_edit_messages,omitempty"`
+	CanPinMessages           bool  `json:"can_pin_messages,omitempty"`
+	CanManageTopics          bool  `json:"can_manage_topics,omitempty"`
+	CanManageTags            bool  `json:"can_manage_tags,omitempty"`
+	CanManageDirectMessages  bool  `json:"can_manage_direct_messages,omitempty"`
+	CanSendWelcomeMessages   bool  `json:"can_send_welcome_messages,omitempty"`
 }
 
 type SetChatAdministratorCustomTitleRequest struct {
@@ -462,6 +480,7 @@ type SetChatAdministratorCustomTitleRequest struct {
 type BanChatSenderChatRequest struct {
 	ChatID       int64 `json:"chat_id"`
 	SenderChatID int64 `json:"sender_chat_id"`
+	UntilDate    int   `json:"until_date,omitempty"`
 }
 
 type UnbanChatSenderChatRequest struct {
@@ -584,11 +603,13 @@ type GetChatMemberCountRequest struct {
 
 type SetChatMenuButtonRequest struct {
 	ChatID     int64       `json:"chat_id,omitempty"`
+	UserID     int64       `json:"user_id,omitempty"`
 	MenuButton *MenuButton `json:"menu_button,omitempty"`
 }
 
 type GetChatMenuButtonRequest struct {
 	ChatID int64 `json:"chat_id,omitempty"`
+	UserID int64 `json:"user_id,omitempty"`
 }
 
 type SetMyDefaultAdministratorRightsRequest struct {
@@ -697,12 +718,14 @@ type UnpinAllGeneralForumTopicMessagesRequest struct {
 }
 
 type AnswerInlineQueryRequest struct {
-	InlineQueryID string          `json:"inline_query_id"`
-	Results       json.RawMessage `json:"results"`
-	CacheTime     int             `json:"cache_time,omitempty"`
-	IsPersonal    bool            `json:"is_personal,omitempty"`
-	NextOffset    string          `json:"next_offset,omitempty"`
-	Button        json.RawMessage `json:"button,omitempty"`
+	InlineQueryID     string          `json:"inline_query_id"`
+	Results           json.RawMessage `json:"results"`
+	CacheTime         int             `json:"cache_time,omitempty"`
+	IsPersonal        bool            `json:"is_personal,omitempty"`
+	NextOffset        string          `json:"next_offset,omitempty"`
+	Button            json.RawMessage `json:"button,omitempty"`
+	SwitchPmText      string          `json:"switch_pm_text,omitempty"`
+	SwitchPmParameter string          `json:"switch_pm_parameter,omitempty"`
 }
 
 type AnswerWebAppQueryRequest struct {
@@ -750,6 +773,7 @@ type SendInvoiceRequest struct {
 }
 
 type CreateInvoiceLinkRequest struct {
+	BusinessConnectionID      string          `json:"business_connection_id,omitempty"`
 	Title                     string          `json:"title"`
 	Description               string          `json:"description"`
 	Payload                   string          `json:"payload"`
@@ -810,11 +834,26 @@ type GetStarTransactionsRequest struct {
 }
 
 type SendGiftRequest struct {
-	UserID        int64  `json:"user_id"`
+	UserID        int64  `json:"user_id,omitempty"`
+	ChatID        int64  `json:"chat_id,omitempty"`
 	GiftID        string `json:"gift_id"`
 	PayForUpgrade bool   `json:"pay_for_upgrade,omitempty"`
 	Text          string `json:"text,omitempty"`
 	TextParseMode string `json:"text_parse_mode,omitempty"`
+}
+
+type DeleteMessageReactionRequest struct {
+	ChatID      int64  `json:"chat_id"`
+	MessageID   int64  `json:"message_id"`
+	UserID      int64  `json:"user_id,omitempty"`
+	ActorChatID string `json:"actor_chat_id,omitempty"`
+}
+
+type DeleteAllMessageReactionsRequest struct {
+	ChatID      int64  `json:"chat_id"`
+	MessageID   int64  `json:"message_id,omitempty"`
+	ActorChatID string `json:"actor_chat_id,omitempty"`
+	UserID      int64  `json:"user_id,omitempty"`
 }
 
 type VerifyUserRequest struct {
@@ -846,6 +885,7 @@ type GetCustomEmojiStickersRequest struct {
 type UploadStickerFileRequest struct {
 	UserID        int64  `json:"user_id"`
 	Sticker       string `json:"sticker,omitempty"`
+	PngSticker    string `json:"png_sticker,omitempty"`
 	StickerFormat string `json:"sticker_format"`
 	StickerData   []byte `json:"-"`
 }
@@ -857,6 +897,7 @@ type CreateNewStickerSetRequest struct {
 	Stickers        json.RawMessage `json:"stickers"`
 	StickerType     string          `json:"sticker_type,omitempty"`
 	NeedsRepainting bool            `json:"needs_repainting,omitempty"`
+	ContainsMasks   bool            `json:"contains_masks,omitempty"`
 }
 
 type AddStickerToSetRequest struct {
@@ -934,6 +975,7 @@ type SetGameScoreRequest struct {
 	Score              int64  `json:"score"`
 	Force              bool   `json:"force,omitempty"`
 	DisableEditMessage bool   `json:"disable_edit_message,omitempty"`
+	EditMessage        *bool  `json:"edit_message,omitempty"`
 	ChatID             int64  `json:"chat_id,omitempty"`
 	MessageID          int64  `json:"message_id,omitempty"`
 	InlineMessageID    string `json:"inline_message_id,omitempty"`
