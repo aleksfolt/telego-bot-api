@@ -913,7 +913,8 @@ func (b *BotInstance) GetBusinessConnection(ctx context.Context, connectionID st
 	return nil, fmt.Errorf("business connection not found")
 }
 
-// resolvePeer tries in-memory cache first, falling back to Redis if needed.
+// resolvePeer tries in-memory cache first, falling back to Redis if needed,
+// and finally refreshing dialogs via MTProto before returning standard "chat not found".
 func (b *BotInstance) resolvePeer(chatID int64) (tg.InputPeerClass, error) {
 	peer, err := b.peers.ResolvePeer(chatID)
 	if err == nil {
@@ -937,7 +938,29 @@ func (b *BotInstance) resolvePeer(chatID int64) (tg.InputPeerClass, error) {
 		}
 	}
 
-	return nil, err
+	// Try fetching dialogs via MTProto to discover any channels/chats the bot belongs to
+	if b.raw != nil {
+		dCtx, dCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer dCancel()
+		if res, dErr := b.raw.MessagesGetDialogs(dCtx, &tg.MessagesGetDialogsRequest{
+			OffsetPeer: &tg.InputPeerEmpty{},
+			Limit:      100,
+		}); dErr == nil {
+			switch d := res.(type) {
+			case *tg.MessagesDialogs:
+				b.savePeersToRedis(d.Users, d.Chats)
+				b.peers.IngestPeers(d.Users, d.Chats)
+			case *tg.MessagesDialogsSlice:
+				b.savePeersToRedis(d.Users, d.Chats)
+				b.peers.IngestPeers(d.Users, d.Chats)
+			}
+			if p, pErr := b.peers.ResolvePeer(chatID); pErr == nil {
+				return p, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("chat not found")
 }
 
 // ------------------------------------------------------------------------------------------------
