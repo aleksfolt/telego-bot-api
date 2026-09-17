@@ -302,3 +302,102 @@ func TestParseReplyKeyboard_RequestTypes(t *testing.T) {
 	assert.True(t, isBroadcast)
 }
 
+func TestParseInlineKeyboard_ButtonStyles(t *testing.T) {
+	raw := []byte(`{
+		"inline_keyboard": [
+			[
+				{"text": "Primary", "callback_data": "p", "style": "primary"},
+				{"text": "Danger", "callback_data": "d", "style": "danger"},
+				{"text": "Success", "callback_data": "s", "style": "success"}
+			],
+			[
+				{"text": "With Emoji", "url": "https://t.me", "style": "primary", "icon_custom_emoji_id": "54321"}
+			]
+		]
+	}`)
+
+	markup, err := converter.ParseReplyMarkup(raw)
+	require.NoError(t, err)
+	require.NotNil(t, markup)
+
+	inlineMarkup, ok := markup.(*tg.ReplyInlineMarkup)
+	require.True(t, ok)
+	require.Len(t, inlineMarkup.Rows, 2)
+
+	// Row 0, Btn 0: Primary
+	btn0, ok := inlineMarkup.Rows[0].Buttons[0].(*tg.KeyboardButtonCallback)
+	require.True(t, ok)
+	style0, ok0 := btn0.GetStyle()
+	require.True(t, ok0)
+	assert.True(t, style0.BgPrimary)
+	assert.False(t, style0.BgDanger)
+	assert.False(t, style0.BgSuccess)
+
+	// Row 0, Btn 1: Danger
+	btn1, ok := inlineMarkup.Rows[0].Buttons[1].(*tg.KeyboardButtonCallback)
+	require.True(t, ok)
+	style1, ok1 := btn1.GetStyle()
+	require.True(t, ok1)
+	assert.False(t, style1.BgPrimary)
+	assert.True(t, style1.BgDanger)
+	assert.False(t, style1.BgSuccess)
+
+	// Row 0, Btn 2: Success
+	btn2, ok := inlineMarkup.Rows[0].Buttons[2].(*tg.KeyboardButtonCallback)
+	require.True(t, ok)
+	style2, ok2 := btn2.GetStyle()
+	require.True(t, ok2)
+	assert.False(t, style2.BgPrimary)
+	assert.False(t, style2.BgDanger)
+	assert.True(t, style2.BgSuccess)
+
+	// Row 1, Btn 0: Primary + Icon
+	btn3, ok := inlineMarkup.Rows[1].Buttons[0].(*tg.KeyboardButtonURL)
+	require.True(t, ok)
+	style3, ok3 := btn3.GetStyle()
+	require.True(t, ok3)
+	assert.True(t, style3.BgPrimary)
+	assert.Equal(t, int64(54321), style3.Icon)
+
+	// Test reverse conversion to Bot API InlineKeyboardMarkup
+	botApiMarkup := converter.ConvertMTProtoReplyMarkup(inlineMarkup)
+	require.NotNil(t, botApiMarkup)
+	require.Len(t, botApiMarkup.InlineKeyboard, 2)
+	assert.Equal(t, "primary", botApiMarkup.InlineKeyboard[0][0].Style)
+	assert.Equal(t, "danger", botApiMarkup.InlineKeyboard[0][1].Style)
+	assert.Equal(t, "success", botApiMarkup.InlineKeyboard[0][2].Style)
+	assert.Equal(t, "primary", botApiMarkup.InlineKeyboard[1][0].Style)
+	assert.Equal(t, "54321", botApiMarkup.InlineKeyboard[1][0].IconCustomEmojiID)
+}
+
+func TestParseReplyKeyboard_ButtonStyles(t *testing.T) {
+	raw := []byte(`{
+		"keyboard": [
+			[
+				{"text": "Red Action", "style": "danger"},
+				{"text": "Green Action", "style": "success"}
+			]
+		]
+	}`)
+
+	markup, err := converter.ParseReplyMarkup(raw)
+	require.NoError(t, err)
+	require.NotNil(t, markup)
+
+	replyMarkup, ok := markup.(*tg.ReplyKeyboardMarkup)
+	require.True(t, ok)
+	require.Len(t, replyMarkup.Rows, 1)
+
+	btn0, ok := replyMarkup.Rows[0].Buttons[0].(*tg.KeyboardButton)
+	require.True(t, ok)
+	s0, ok0 := btn0.GetStyle()
+	require.True(t, ok0)
+	assert.True(t, s0.BgDanger)
+
+	btn1, ok := replyMarkup.Rows[0].Buttons[1].(*tg.KeyboardButton)
+	require.True(t, ok)
+	s1, ok1 := btn1.GetStyle()
+	require.True(t, ok1)
+	assert.True(t, s1.BgSuccess)
+}
+
