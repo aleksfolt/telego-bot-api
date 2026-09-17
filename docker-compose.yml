@@ -2,17 +2,23 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --appendfsync everysec
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   telego-bot-api:
     build: .
     restart: unless-stopped
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     ports:
       - "8082:8082"
     environment:
@@ -21,7 +27,17 @@ services:
       - TELEGO_HTTP_ADDR=0.0.0.0:8082
       - TELEGO_REDIS_ADDR=redis:6379
       - TELEGO_LOG_LEVEL=info
-      - TELEGO_LOG_FORMAT=console
+      - TELEGO_LOG_FORMAT=json
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8082/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 volumes:
   redis_data:

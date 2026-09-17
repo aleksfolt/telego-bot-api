@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -49,9 +51,19 @@ func main() {
 	// 3. Multi-bot MTProto session manager backed by Redis
 	bm := botmanager.NewManager(cfg, rdb, dispatcher, logger)
 
+	// Optional runtime pprof profiling server
+	if cfg.PprofAddr != "" {
+		go func() {
+			logger.Info("Starting pprof diagnostic server", zap.String("addr", cfg.PprofAddr))
+			if err := http.ListenAndServe(cfg.PprofAddr, nil); err != nil && err != http.ErrServerClosed {
+				logger.Warn("pprof server exited", zap.Error(err))
+			}
+		}()
+	}
+
 	// 4. Restore and keep-alive all registered bots from Redis in background
 	go func() {
-		restoreCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		restoreCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 		if err := bm.LoadAndStartAll(restoreCtx); err != nil {
 			logger.Warn("Failed to restore all bots from Redis", zap.Error(err))
