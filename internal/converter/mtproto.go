@@ -878,6 +878,9 @@ func (c *MTProtoConverter) ConvertMessage(m tg.MessageClass, entities *EntityCon
 		result.CaptionEntities = msgEntities
 		applyMessageMedia(result, msg.Media)
 	}
+	if msg.ReplyMarkup != nil {
+		result.ReplyMarkup = ConvertMTProtoReplyMarkup(msg.ReplyMarkup)
+	}
 	return result, nil
 }
 

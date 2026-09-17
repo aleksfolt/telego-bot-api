@@ -196,6 +196,29 @@ type Message struct {
 	PinnedMessage                 *Message                       `json:"pinned_message,omitempty"`
 	MessageAutoDeleteTimerChanged *MessageAutoDeleteTimerChanged `json:"message_auto_delete_timer_changed,omitempty"`
 	ReplyToMessage                *Message                       `json:"reply_to_message,omitempty"`
+	ReplyMarkup                   *InlineKeyboardMarkup          `json:"reply_markup,omitempty"`
+}
+
+// InlineKeyboardButton represents one button of an inline keyboard.
+type InlineKeyboardButton struct {
+	Text                         string                          `json:"text"`
+	URL                          string                          `json:"url,omitempty"`
+	CallbackData                 string                          `json:"callback_data,omitempty"`
+	WebApp                       *RawWebAppInfo                  `json:"web_app,omitempty"`
+	LoginURL                     *RawLoginURL                    `json:"login_url,omitempty"`
+	SwitchInlineQuery            *string                         `json:"switch_inline_query,omitempty"`
+	SwitchInlineQueryCurrentChat *string                         `json:"switch_inline_query_current_chat,omitempty"`
+	SwitchInlineQueryChosenChat  *RawSwitchInlineQueryChosenChat `json:"switch_inline_query_chosen_chat,omitempty"`
+	CopyText                     *RawCopyTextButton              `json:"copy_text,omitempty"`
+	CallbackGame                 *RawCallbackGame                `json:"callback_game,omitempty"`
+	Pay                          bool                            `json:"pay,omitempty"`
+	Style                        string                          `json:"style,omitempty"`
+	IconCustomEmojiID            string                          `json:"icon_custom_emoji_id,omitempty"`
+}
+
+// InlineKeyboardMarkup represents an inline keyboard that appears right next to the message it belongs to.
+type InlineKeyboardMarkup struct {
+	InlineKeyboard [][]InlineKeyboardButton `json:"inline_keyboard"`
 }
 
 // MessageID represents response with a message ID (e.g. copyMessage).

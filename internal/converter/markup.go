@@ -3,9 +3,24 @@ package converter
 import (
 	"bytes"
 	"encoding/json"
+	"strconv"
+	"strings"
 
 	"github.com/gotd/td/tg"
 )
+
+// CustomEmojiID handles custom emoji ID represented as a string or a JSON integer.
+type CustomEmojiID string
+
+func (c *CustomEmojiID) UnmarshalJSON(b []byte) error {
+	trimmed := strings.Trim(string(b), "\"")
+	if trimmed == "null" {
+		*c = ""
+		return nil
+	}
+	*c = CustomEmojiID(trimmed)
+	return nil
+}
 
 // RawWebAppInfo represents a Bot API WebAppInfo object.
 type RawWebAppInfo struct {
@@ -78,6 +93,8 @@ type RawInlineKeyboardButton struct {
 	CopyText                     *RawCopyTextButton              `json:"copy_text,omitempty"`
 	CallbackGame                 *RawCallbackGame                `json:"callback_game,omitempty"`
 	Pay                          bool                            `json:"pay,omitempty"`
+	Style                        string                          `json:"style,omitempty"`
+	IconCustomEmojiID            CustomEmojiID                   `json:"icon_custom_emoji_id,omitempty"`
 }
 
 // RawInlineKeyboardMarkup represents a Bot API inline keyboard markup.
@@ -87,13 +104,15 @@ type RawInlineKeyboardMarkup struct {
 
 // RawKeyboardButton represents a Bot API reply keyboard button.
 type RawKeyboardButton struct {
-	Text            string                         `json:"text"`
-	RequestContact  bool                           `json:"request_contact,omitempty"`
-	RequestLocation bool                           `json:"request_location,omitempty"`
-	RequestPoll     *RawKeyboardButtonPollType     `json:"request_poll,omitempty"`
-	RequestUsers    *RawKeyboardButtonRequestUsers `json:"request_users,omitempty"`
-	RequestChat     *RawKeyboardButtonRequestChat  `json:"request_chat,omitempty"`
-	WebApp          *RawWebAppInfo                 `json:"web_app,omitempty"`
+	Text              string                         `json:"text"`
+	RequestContact    bool                           `json:"request_contact,omitempty"`
+	RequestLocation   bool                           `json:"request_location,omitempty"`
+	RequestPoll       *RawKeyboardButtonPollType     `json:"request_poll,omitempty"`
+	RequestUsers      *RawKeyboardButtonRequestUsers `json:"request_users,omitempty"`
+	RequestChat       *RawKeyboardButtonRequestChat  `json:"request_chat,omitempty"`
+	WebApp            *RawWebAppInfo                 `json:"web_app,omitempty"`
+	Style             string                         `json:"style,omitempty"`
+	IconCustomEmojiID CustomEmojiID                  `json:"icon_custom_emoji_id,omitempty"`
 }
 
 // RawReplyKeyboardMarkup represents a Bot API reply keyboard markup.
@@ -119,6 +138,72 @@ type RawForceReply struct {
 	Selective             bool   `json:"selective,omitempty"`
 }
 
+func parseButtonStyle(style string, iconEmojiID CustomEmojiID) (tg.KeyboardButtonStyle, bool) {
+	var kbs tg.KeyboardButtonStyle
+	hasStyle := false
+
+	switch strings.ToLower(style) {
+	case "primary":
+		kbs.SetBgPrimary(true)
+		hasStyle = true
+	case "danger":
+		kbs.SetBgDanger(true)
+		hasStyle = true
+	case "success":
+		kbs.SetBgSuccess(true)
+		hasStyle = true
+	}
+
+	if iconEmojiID != "" {
+		if id, err := strconv.ParseInt(string(iconEmojiID), 10, 64); err == nil && id != 0 {
+			kbs.SetIcon(id)
+			hasStyle = true
+		}
+	}
+
+	return kbs, hasStyle
+}
+
+func applyButtonStyle(btn tg.KeyboardButtonClass, style string, iconEmojiID CustomEmojiID) tg.KeyboardButtonClass {
+	kbs, hasStyle := parseButtonStyle(style, iconEmojiID)
+	if !hasStyle {
+		return btn
+	}
+
+	switch b := btn.(type) {
+	case *tg.KeyboardButtonCallback:
+		b.SetStyle(kbs)
+	case *tg.KeyboardButtonURL:
+		b.SetStyle(kbs)
+	case *tg.KeyboardButtonWebView:
+		b.SetStyle(kbs)
+	case *tg.KeyboardButtonCopy:
+		b.SetStyle(kbs)
+	case *tg.KeyboardButtonSwitchInline:
+		b.SetStyle(kbs)
+	case *tg.KeyboardButtonBuy:
+		b.SetStyle(kbs)
+	case *tg.KeyboardButtonGame:
+		b.SetStyle(kbs)
+	case *tg.InputKeyboardButtonURLAuth:
+		b.SetStyle(kbs)
+	case *tg.KeyboardButton:
+		b.SetStyle(kbs)
+	case *tg.KeyboardButtonSimpleWebView:
+		b.SetStyle(kbs)
+	case *tg.KeyboardButtonRequestPhone:
+		b.SetStyle(kbs)
+	case *tg.KeyboardButtonRequestGeoLocation:
+		b.SetStyle(kbs)
+	case *tg.KeyboardButtonRequestPoll:
+		b.SetStyle(kbs)
+	case *tg.InputKeyboardButtonRequestPeer:
+		b.SetStyle(kbs)
+	}
+
+	return btn
+}
+
 // ParseReplyMarkup parses JSON raw message into a tg.ReplyMarkupClass for MTProto.
 func ParseReplyMarkup(raw []byte) (tg.ReplyMarkupClass, error) {
 	if len(raw) == 0 || string(raw) == "null" {
@@ -141,30 +226,31 @@ func ParseReplyMarkup(raw []byte) (tg.ReplyMarkupClass, error) {
 		for _, rawRow := range inline.InlineKeyboard {
 			var buttons []tg.KeyboardButtonClass
 			for _, btn := range rawRow {
+				var b tg.KeyboardButtonClass
 				if btn.WebApp != nil && btn.WebApp.URL != "" {
-					buttons = append(buttons, &tg.KeyboardButtonWebView{
+					b = &tg.KeyboardButtonWebView{
 						Text: btn.Text,
 						URL:  btn.WebApp.URL,
-					})
+					}
 				} else if btn.CallbackData != "" {
 					data := btn.CallbackData
 					if len(data) > 64 {
 						data = data[:64]
 					}
-					buttons = append(buttons, &tg.KeyboardButtonCallback{
+					b = &tg.KeyboardButtonCallback{
 						Text: btn.Text,
 						Data: []byte(data),
-					})
+					}
 				} else if btn.URL != "" {
-					buttons = append(buttons, &tg.KeyboardButtonURL{
+					b = &tg.KeyboardButtonURL{
 						Text: btn.Text,
 						URL:  btn.URL,
-					})
+					}
 				} else if btn.CopyText != nil {
-					buttons = append(buttons, &tg.KeyboardButtonCopy{
+					b = &tg.KeyboardButtonCopy{
 						Text:     btn.Text,
 						CopyText: btn.CopyText.Text,
-					})
+					}
 				} else if btn.LoginURL != nil && btn.LoginURL.URL != "" {
 					auth := &tg.InputKeyboardButtonURLAuth{
 						Text:               btn.Text,
@@ -178,18 +264,18 @@ func ParseReplyMarkup(raw []byte) (tg.ReplyMarkupClass, error) {
 					if btn.LoginURL.RequestWriteAccess {
 						auth.SetRequestWriteAccess(true)
 					}
-					buttons = append(buttons, auth)
+					b = auth
 				} else if btn.SwitchInlineQuery != nil {
-					buttons = append(buttons, &tg.KeyboardButtonSwitchInline{
+					b = &tg.KeyboardButtonSwitchInline{
 						Text:  btn.Text,
 						Query: *btn.SwitchInlineQuery,
-					})
+					}
 				} else if btn.SwitchInlineQueryCurrentChat != nil {
-					buttons = append(buttons, &tg.KeyboardButtonSwitchInline{
+					b = &tg.KeyboardButtonSwitchInline{
 						Text:     btn.Text,
 						Query:    *btn.SwitchInlineQueryCurrentChat,
 						SamePeer: true,
-					})
+					}
 				} else if btn.SwitchInlineQueryChosenChat != nil {
 					var peerTypes []tg.InlineQueryPeerTypeClass
 					if btn.SwitchInlineQueryChosenChat.AllowUserChats {
@@ -211,15 +297,15 @@ func ParseReplyMarkup(raw []byte) (tg.ReplyMarkupClass, error) {
 					if len(peerTypes) > 0 {
 						sw.SetPeerTypes(peerTypes)
 					}
-					buttons = append(buttons, sw)
+					b = sw
 				} else if btn.CallbackGame != nil {
-					buttons = append(buttons, &tg.KeyboardButtonGame{
+					b = &tg.KeyboardButtonGame{
 						Text: btn.Text,
-					})
+					}
 				} else if btn.Pay {
-					buttons = append(buttons, &tg.KeyboardButtonBuy{
+					b = &tg.KeyboardButtonBuy{
 						Text: btn.Text,
-					})
+					}
 				} else {
 					// Fallback for inline keyboard: MUST NEVER use standard tg.KeyboardButton.
 					// Standard KeyboardButton inside ReplyInlineMarkup triggers BUTTON_TYPE_INVALID in MTProto.
@@ -231,11 +317,12 @@ func ParseReplyMarkup(raw []byte) (tg.ReplyMarkupClass, error) {
 					if len(data) > 64 {
 						data = data[:64]
 					}
-					buttons = append(buttons, &tg.KeyboardButtonCallback{
+					b = &tg.KeyboardButtonCallback{
 						Text: btn.Text,
 						Data: []byte(data),
-					})
+					}
 				}
+				buttons = append(buttons, applyButtonStyle(b, btn.Style, btn.IconCustomEmojiID))
 			}
 			rows = append(rows, tg.KeyboardButtonRow{Buttons: buttons})
 		}
@@ -270,14 +357,15 @@ func ParseReplyMarkup(raw []byte) (tg.ReplyMarkupClass, error) {
 		for _, rawRow := range reply.Keyboard {
 			var buttons []tg.KeyboardButtonClass
 			for _, btn := range rawRow {
+				var b tg.KeyboardButtonClass
 				if btn.RequestContact {
-					buttons = append(buttons, &tg.KeyboardButtonRequestPhone{
+					b = &tg.KeyboardButtonRequestPhone{
 						Text: btn.Text,
-					})
+					}
 				} else if btn.RequestLocation {
-					buttons = append(buttons, &tg.KeyboardButtonRequestGeoLocation{
+					b = &tg.KeyboardButtonRequestGeoLocation{
 						Text: btn.Text,
-					})
+					}
 				} else if btn.RequestPoll != nil {
 					pollBtn := &tg.KeyboardButtonRequestPoll{
 						Text: btn.Text,
@@ -285,7 +373,7 @@ func ParseReplyMarkup(raw []byte) (tg.ReplyMarkupClass, error) {
 					if btn.RequestPoll.Type == "quiz" {
 						pollBtn.SetQuiz(true)
 					}
-					buttons = append(buttons, pollBtn)
+					b = pollBtn
 				} else if btn.RequestUsers != nil {
 					reqUser := &tg.RequestPeerTypeUser{}
 					if btn.RequestUsers.UserIsBot != nil {
@@ -313,7 +401,7 @@ func ParseReplyMarkup(raw []byte) (tg.ReplyMarkupClass, error) {
 					if btn.RequestUsers.RequestPhoto {
 						btnReq.SetPhotoRequested(true)
 					}
-					buttons = append(buttons, btnReq)
+					b = btnReq
 				} else if btn.RequestChat != nil {
 					var peerType tg.RequestPeerTypeClass
 					if btn.RequestChat.ChatIsChannel {
@@ -353,17 +441,18 @@ func ParseReplyMarkup(raw []byte) (tg.ReplyMarkupClass, error) {
 					if btn.RequestChat.RequestPhoto {
 						btnReq.SetPhotoRequested(true)
 					}
-					buttons = append(buttons, btnReq)
+					b = btnReq
 				} else if btn.WebApp != nil && btn.WebApp.URL != "" {
-					buttons = append(buttons, &tg.KeyboardButtonSimpleWebView{
+					b = &tg.KeyboardButtonSimpleWebView{
 						Text: btn.Text,
 						URL:  btn.WebApp.URL,
-					})
+					}
 				} else {
-					buttons = append(buttons, &tg.KeyboardButton{
+					b = &tg.KeyboardButton{
 						Text: btn.Text,
-					})
+					}
 				}
+				buttons = append(buttons, applyButtonStyle(b, btn.Style, btn.IconCustomEmojiID))
 			}
 			rows = append(rows, tg.KeyboardButtonRow{Buttons: buttons})
 		}
@@ -383,4 +472,87 @@ func ParseReplyMarkup(raw []byte) (tg.ReplyMarkupClass, error) {
 	}
 
 	return nil, nil
+}
+
+// ConvertMTProtoReplyMarkup converts an MTProto ReplyMarkupClass into a Bot API InlineKeyboardMarkup if applicable.
+func ConvertMTProtoReplyMarkup(rm tg.ReplyMarkupClass) *InlineKeyboardMarkup {
+	if rm == nil {
+		return nil
+	}
+
+	inline, ok := rm.(*tg.ReplyInlineMarkup)
+	if !ok || len(inline.Rows) == 0 {
+		return nil
+	}
+
+	var rows [][]InlineKeyboardButton
+	for _, row := range inline.Rows {
+		var buttons []InlineKeyboardButton
+		for _, btn := range row.Buttons {
+			var ikb InlineKeyboardButton
+			var style tg.KeyboardButtonStyle
+			var hasStyle bool
+
+			switch b := btn.(type) {
+			case *tg.KeyboardButtonCallback:
+				ikb.Text = b.Text
+				ikb.CallbackData = string(b.Data)
+				style, hasStyle = b.GetStyle()
+			case *tg.KeyboardButtonURL:
+				ikb.Text = b.Text
+				ikb.URL = b.URL
+				style, hasStyle = b.GetStyle()
+			case *tg.KeyboardButtonWebView:
+				ikb.Text = b.Text
+				ikb.WebApp = &RawWebAppInfo{URL: b.URL}
+				style, hasStyle = b.GetStyle()
+			case *tg.KeyboardButtonCopy:
+				ikb.Text = b.Text
+				ikb.CopyText = &RawCopyTextButton{Text: b.CopyText}
+				style, hasStyle = b.GetStyle()
+			case *tg.KeyboardButtonSwitchInline:
+				ikb.Text = b.Text
+				if b.SamePeer {
+					ikb.SwitchInlineQueryCurrentChat = &b.Query
+				} else {
+					ikb.SwitchInlineQuery = &b.Query
+				}
+				style, hasStyle = b.GetStyle()
+			case *tg.KeyboardButtonBuy:
+				ikb.Text = b.Text
+				ikb.Pay = true
+				style, hasStyle = b.GetStyle()
+			case *tg.KeyboardButtonGame:
+				ikb.Text = b.Text
+				ikb.CallbackGame = &RawCallbackGame{}
+				style, hasStyle = b.GetStyle()
+			case *tg.InputKeyboardButtonURLAuth:
+				ikb.Text = b.Text
+				ikb.LoginURL = &RawLoginURL{
+					URL:                b.URL,
+					ForwardText:        b.FwdText,
+					RequestWriteAccess: b.RequestWriteAccess,
+				}
+				style, hasStyle = b.GetStyle()
+			}
+
+			if hasStyle {
+				if style.BgPrimary {
+					ikb.Style = "primary"
+				} else if style.BgDanger {
+					ikb.Style = "danger"
+				} else if style.BgSuccess {
+					ikb.Style = "success"
+				}
+				if style.Icon != 0 {
+					ikb.IconCustomEmojiID = strconv.FormatInt(style.Icon, 10)
+				}
+			}
+
+			buttons = append(buttons, ikb)
+		}
+		rows = append(rows, buttons)
+	}
+
+	return &InlineKeyboardMarkup{InlineKeyboard: rows}
 }
