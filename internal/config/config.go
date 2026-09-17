@@ -19,6 +19,7 @@ type Config struct {
 	LogLevel      string
 	LogFormat     string
 	MTProtoDebug  bool
+	PprofAddr     string
 }
 
 // Load loads configuration from environment variables and command-line flags.
@@ -70,6 +71,9 @@ func Load() *Config {
 	if val := getEnv("TELEGO_MTPROTO_DEBUG", "MTPROTO_DEBUG"); val == "true" || val == "1" {
 		cfg.MTProtoDebug = true
 	}
+	if val := getEnv("TELEGO_PPROF_ADDR", "PPROF_ADDR"); val != "" {
+		cfg.PprofAddr = val
+	}
 
 	var ipsFlag string
 	flag.IntVar(&cfg.AppID, "api-id", cfg.AppID, "Telegram API ID (from my.telegram.org)")
@@ -82,6 +86,7 @@ func Load() *Config {
 	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "Log level: debug, info, warn, error")
 	flag.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "Log format: console (human-readable colors) or json (production)")
 	flag.BoolVar(&cfg.MTProtoDebug, "mtproto-debug", cfg.MTProtoDebug, "Enable verbose wire-level MTProto transport debug dumps (default: false)")
+	flag.StringVar(&cfg.PprofAddr, "pprof-addr", cfg.PprofAddr, "Optional address for pprof HTTP server (e.g. 127.0.0.1:6060)")
 	flag.Parse()
 
 	if ipsFlag != "" {
