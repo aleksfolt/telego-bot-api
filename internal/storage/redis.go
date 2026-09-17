@@ -478,3 +478,17 @@ func (s *BotSessionStorage) LoadSession(ctx context.Context) ([]byte, error) {
 func (s *BotSessionStorage) StoreSession(ctx context.Context, data []byte) error {
 	return s.client.Set(ctx, s.key, data, 0).Err()
 }
+
+// SaveBotProfile caches the bot User profile JSON in Redis for instant getMe responses.
+func (r *RedisStore) SaveBotProfile(ctx context.Context, token string, profile []byte) error {
+	return r.client.Set(ctx, fmt.Sprintf("telego:profile:%s", token), profile, 0).Err()
+}
+
+// GetBotProfile retrieves cached bot User profile JSON from Redis.
+func (r *RedisStore) GetBotProfile(ctx context.Context, token string) ([]byte, error) {
+	val, err := r.client.Get(ctx, fmt.Sprintf("telego:profile:%s", token)).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return nil, nil
+	}
+	return val, err
+}
