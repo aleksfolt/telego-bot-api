@@ -103,6 +103,10 @@ func MapErrorString(desc string) (int, string, *converter.ResponseParameters) {
 		return 400, "Bad Request: BUTTON_URL_INVALID", nil
 	case strings.Contains(desc, "BUTTON_DATA_INVALID"):
 		return 400, "Bad Request: BUTTON_DATA_INVALID", nil
+	case strings.Contains(desc, "BUSINESS_CONNECTION_INVALID") || strings.Contains(desc, "AUTH_KEY_UNREGISTERED"):
+		return 400, "Bad Request: BUSINESS_CONNECTION_INVALID", nil
+	case strings.Contains(desc, "BUSINESS_PEER_INVALID"):
+		return 400, "Bad Request: BUSINESS_PEER_INVALID", nil
 	}
 
 	// Clean up "rpc error code 400: ..." prefix if present

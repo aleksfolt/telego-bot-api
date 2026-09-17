@@ -479,6 +479,11 @@ func (s *BotSessionStorage) StoreSession(ctx context.Context, data []byte) error
 	return s.client.Set(ctx, s.key, data, 0).Err()
 }
 
+// DeleteSession removes MTProto session bytes from Redis for a given token.
+func (r *RedisStore) DeleteSession(ctx context.Context, token string) error {
+	return r.client.Del(ctx, fmt.Sprintf("telego:session:%s", token)).Err()
+}
+
 // SaveBotProfile caches the bot User profile JSON in Redis for instant getMe responses.
 func (r *RedisStore) SaveBotProfile(ctx context.Context, token string, profile []byte) error {
 	return r.client.Set(ctx, fmt.Sprintf("telego:profile:%s", token), profile, 0).Err()

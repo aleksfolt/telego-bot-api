@@ -75,6 +75,26 @@ func TestMapRpcError_StandardErrors(t *testing.T) {
 			expectedCode: 504,
 			expectedDesc: "Gateway Timeout: request timed out",
 		},
+		{
+			rpcErr:       tgerr.New(401, "AUTH_KEY_UNREGISTERED"),
+			expectedCode: 400,
+			expectedDesc: "Bad Request: BUSINESS_CONNECTION_INVALID",
+		},
+		{
+			rpcErr:       fmt.Errorf("rpcDoRequest: rpc error code 401: AUTH_KEY_UNREGISTERED"),
+			expectedCode: 400,
+			expectedDesc: "Bad Request: BUSINESS_CONNECTION_INVALID",
+		},
+		{
+			rpcErr:       tgerr.New(400, "BUSINESS_CONNECTION_INVALID"),
+			expectedCode: 400,
+			expectedDesc: "Bad Request: BUSINESS_CONNECTION_INVALID",
+		},
+		{
+			rpcErr:       tgerr.New(400, "BUSINESS_PEER_INVALID"),
+			expectedCode: 400,
+			expectedDesc: "Bad Request: BUSINESS_PEER_INVALID",
+		},
 	}
 
 	for _, tc := range tests {
