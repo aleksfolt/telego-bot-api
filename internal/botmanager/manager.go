@@ -54,8 +54,10 @@ func NewManager(cfg *config.Config, rdb *storage.RedisStore, dispatcher *webhook
 }
 
 // LoadAndStartAll restores active bot sessions from Redis.
-// It prioritizes bots with active webhooks first (concurrency 50),
-// then warms up any remaining registered polling bots in the background without blocking API traffic.
+// By default (identical to official telegram-bot-api), it restores ONLY bots with active webhooks (concurrency 25)
+// so webhooks receive updates continuously. All other bots initialize on-demand (lazily) upon their first HTTP request,
+// which prevents Telegram DC flood limits (FLOOD_WAIT) on the server IP and starts the server in 0.1s.
+// If WarmupAll is enabled, it gracefully warms up the remaining bots with pacing.
 func (m *Manager) LoadAndStartAll(ctx context.Context) error {
 	webhookTokens, err := m.redisStore.GetWebhookTokens(ctx)
 	if err != nil {
@@ -70,7 +72,7 @@ func (m *Manager) LoadAndStartAll(ctx context.Context) error {
 	if len(webhookTokens) > 0 {
 		m.logger.Info("Restoring active webhook bots from Redis", zap.Int("count", len(webhookTokens)))
 		var wg sync.WaitGroup
-		sem := make(chan struct{}, 50)
+		sem := make(chan struct{}, 25)
 
 		for _, token := range webhookTokens {
 			wg.Add(1)
@@ -88,9 +90,16 @@ func (m *Manager) LoadAndStartAll(ctx context.Context) error {
 		}
 		wg.Wait()
 		m.logger.Info("All webhook bots restored and listening for updates", zap.Int("active_webhooks", len(webhookTokens)))
+	} else {
+		m.logger.Info("No active webhook bots in Redis. Non-webhook bots will initialize on-demand upon first HTTP request.")
 	}
 
-	// Background non-blocking warm-up for remaining registered bots
+	if !m.cfg.WarmupAll {
+		m.logger.Info("Startup complete: lazy loading enabled (identical to official telegram-bot-api). Bots will connect instantly on first request.")
+		return nil
+	}
+
+	// Background paced warm-up for remaining registered bots (only when explicitly enabled via --warmup-all)
 	tokens, err := m.redisStore.GetRegisteredBots(ctx)
 	if err != nil {
 		return fmt.Errorf("read bots from redis: %w", err)
@@ -104,26 +113,27 @@ func (m *Manager) LoadAndStartAll(ctx context.Context) error {
 	}
 
 	if len(remaining) > 0 {
-		m.logger.Info("Starting background warm-up of registered bots", zap.Int("count", len(remaining)))
-		var wg sync.WaitGroup
-		sem := make(chan struct{}, 50)
+		m.logger.Info("Starting gentle background warm-up of registered bots (--warmup-all)", zap.Int("count", len(remaining)))
+		go func() {
+			ticker := time.NewTicker(100 * time.Millisecond) // Pace at 10 bots/sec to avoid Telegram DC flood limits
+			defer ticker.Stop()
 
-		for _, token := range remaining {
-			wg.Add(1)
-			go func(t string) {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
-
-				botCtx, cancel := context.WithCancel(context.Background())
-				_ = cancel
-				if _, err := m.GetOrCreate(botCtx, t); err != nil {
-					m.logger.Debug("Failed to warm up bot session", zap.String("token_prefix", t[:min(10, len(t))]), zap.Error(err))
+			for _, token := range remaining {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					go func(t string) {
+						botCtx, cancel := context.WithCancel(context.Background())
+						_ = cancel
+						if _, err := m.GetOrCreate(botCtx, t); err != nil {
+							m.logger.Debug("Failed to warm up bot session", zap.String("token_prefix", t[:min(10, len(t))]), zap.Error(err))
+						}
+					}(token)
 				}
-			}(token)
-		}
-		wg.Wait()
-		m.logger.Info("Completed registered bots warm-up", zap.Int("total_active_bots", len(m.bots)))
+			}
+			m.logger.Info("Completed registered bots warm-up", zap.Int("total_active_bots", len(m.bots)))
+		}()
 	}
 
 	return nil
