@@ -479,6 +479,9 @@ type EditMessageMediaRequest struct {
 	InlineMsgID          string          `json:"inline_message_id,omitempty"`
 	Media                json.RawMessage `json:"media"`
 	ReplyMarkup          json.RawMessage `json:"reply_markup,omitempty"`
+
+	Files     map[string][]byte `json:"-"`
+	FileNames map[string]string `json:"-"`
 }
 
 // DeleteMessageRequest represents parameters for deleteMessage.
@@ -581,6 +584,7 @@ type SendVideoRequest struct {
 	ChatID               int64            `json:"chat_id"`
 	MessageThreadID      int              `json:"message_thread_id,omitempty"`
 	Video                string           `json:"video"`
+	Thumbnail            string           `json:"thumbnail,omitempty"`
 	Duration             int              `json:"duration,omitempty"`
 	Width                int              `json:"width,omitempty"`
 	Height               int              `json:"height,omitempty"`
@@ -595,6 +599,7 @@ type SendVideoRequest struct {
 	ReplyParameters      *ReplyParameters `json:"reply_parameters,omitempty"`
 	ReplyMarkup          json.RawMessage  `json:"reply_markup,omitempty"`
 
+	ThumbnailData []byte `json:"-"`
 	VideoData     []byte `json:"-"`
 	VideoFileName string `json:"-"`
 }
@@ -605,6 +610,7 @@ type SendDocumentRequest struct {
 	ChatID                      int64            `json:"chat_id"`
 	MessageThreadID             int              `json:"message_thread_id,omitempty"`
 	Document                    string           `json:"document"`
+	Thumbnail                   string           `json:"thumbnail,omitempty"`
 	Caption                     string           `json:"caption,omitempty"`
 	ParseMode                   string           `json:"parse_mode,omitempty"`
 	CaptionEntities             []MessageEntity  `json:"caption_entities,omitempty"`
@@ -615,6 +621,7 @@ type SendDocumentRequest struct {
 	ReplyParameters             *ReplyParameters `json:"reply_parameters,omitempty"`
 	ReplyMarkup                 json.RawMessage  `json:"reply_markup,omitempty"`
 
+	ThumbnailData    []byte `json:"-"`
 	DocumentData     []byte `json:"-"`
 	DocumentFileName string `json:"-"`
 }
@@ -645,6 +652,7 @@ type SendAudioRequest struct {
 	ChatID               int64            `json:"chat_id"`
 	MessageThreadID      int              `json:"message_thread_id,omitempty"`
 	Audio                string           `json:"audio"`
+	Thumbnail            string           `json:"thumbnail,omitempty"`
 	Caption              string           `json:"caption,omitempty"`
 	ParseMode            string           `json:"parse_mode,omitempty"`
 	CaptionEntities      []MessageEntity  `json:"caption_entities,omitempty"`
@@ -657,6 +665,7 @@ type SendAudioRequest struct {
 	ReplyParameters      *ReplyParameters `json:"reply_parameters,omitempty"`
 	ReplyMarkup          json.RawMessage  `json:"reply_markup,omitempty"`
 
+	ThumbnailData []byte `json:"-"`
 	AudioData     []byte `json:"-"`
 	AudioFileName string `json:"-"`
 }
@@ -667,6 +676,7 @@ type SendAnimationRequest struct {
 	ChatID               int64            `json:"chat_id"`
 	MessageThreadID      int              `json:"message_thread_id,omitempty"`
 	Animation            string           `json:"animation"`
+	Thumbnail            string           `json:"thumbnail,omitempty"`
 	Duration             int              `json:"duration,omitempty"`
 	Width                int              `json:"width,omitempty"`
 	Height               int              `json:"height,omitempty"`
@@ -680,6 +690,7 @@ type SendAnimationRequest struct {
 	ReplyParameters      *ReplyParameters `json:"reply_parameters,omitempty"`
 	ReplyMarkup          json.RawMessage  `json:"reply_markup,omitempty"`
 
+	ThumbnailData     []byte `json:"-"`
 	AnimationData     []byte `json:"-"`
 	AnimationFileName string `json:"-"`
 }
@@ -690,6 +701,7 @@ type SendVideoNoteRequest struct {
 	ChatID               int64            `json:"chat_id"`
 	MessageThreadID      int              `json:"message_thread_id,omitempty"`
 	VideoNote            string           `json:"video_note"`
+	Thumbnail            string           `json:"thumbnail,omitempty"`
 	Duration             int              `json:"duration,omitempty"`
 	Length               int              `json:"length,omitempty"`
 	DisableNotification  bool             `json:"disable_notification,omitempty"`
@@ -698,6 +710,7 @@ type SendVideoNoteRequest struct {
 	ReplyParameters      *ReplyParameters `json:"reply_parameters,omitempty"`
 	ReplyMarkup          json.RawMessage  `json:"reply_markup,omitempty"`
 
+	ThumbnailData     []byte `json:"-"`
 	VideoNoteData     []byte `json:"-"`
 	VideoNoteFileName string `json:"-"`
 }
@@ -784,6 +797,7 @@ type InputMediaItem struct {
 	SupportsStreaming     bool            `json:"supports_streaming,omitempty"`
 	ShowCaptionAboveMedia bool            `json:"show_caption_above_media,omitempty"`
 	HasSpoiler            bool            `json:"has_spoiler,omitempty"`
+	Thumbnail             string          `json:"thumbnail,omitempty"`
 }
 
 // SendMediaGroupRequest represents parameters for sendMediaGroup.

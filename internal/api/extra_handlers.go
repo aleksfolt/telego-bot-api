@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"io"
 	"time"
 
 	"telego-bot-api/internal/botmanager"
@@ -314,7 +313,12 @@ func (s *Server) handleSetChatPhoto(ctx *fasthttp.RequestCtx, bot *botmanager.Bo
 		s.respondError(ctx, 400, "Bad Request: "+err.Error())
 		return
 	}
-	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+	if data, _ := ExtractFileFromRequest(ctx, "photo", req.Photo); len(data) > 0 {
+		req.PhotoData = data
+	}
+
+	c, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	ok, err := bot.SetChatPhoto(c, &req)
@@ -1215,24 +1219,7 @@ func (s *Server) handleSendPaidMedia(ctx *fasthttp.RequestCtx, bot *botmanager.B
 		s.respondError(ctx, 400, "Bad Request: "+err.Error())
 		return
 	}
-	if mf, err := ctx.MultipartForm(); err == nil && mf != nil {
-		req.Files = make(map[string][]byte)
-		req.FileNames = make(map[string]string)
-		for name, fhs := range mf.File {
-			if len(fhs) == 0 {
-				continue
-			}
-			file, err := fhs[0].Open()
-			if err != nil {
-				continue
-			}
-			data, readErr := io.ReadAll(file)
-			_ = file.Close()
-			if readErr == nil {
-				req.Files[name], req.FileNames[name] = data, fhs[0].Filename
-			}
-		}
-	}
+	req.Files, req.FileNames = ExtractAllFilesFromRequest(ctx)
 	c, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 

@@ -2722,18 +2722,18 @@ func (b *BotInstance) SetStickerSetTitle(ctx context.Context, req *converter.Set
 // SetStickerSetThumbnail sets the thumbnail of a regular or mask sticker set.
 func (b *BotInstance) SetStickerSetThumbnail(ctx context.Context, req *converter.SetStickerSetThumbnailRequest) (bool, error) {
 	request := &tg.StickersSetStickerSetThumbRequest{Stickerset: &tg.InputStickerSetShortName{ShortName: req.Name}}
-	if req.Thumbnail != "" {
-		document, err := inputDocumentFromFileID(req.Thumbnail)
-		if err != nil {
-			return false, err
-		}
-		request.SetThumb(document)
-	} else if len(req.ThumbnailData) != 0 {
+	if len(req.ThumbnailData) != 0 {
 		document, err := b.uploadStickerDocument(ctx, req.ThumbnailData, "thumbnail", req.Format)
 		if err != nil {
 			return false, err
 		}
 		request.SetThumb(&tg.InputDocument{ID: document.ID, AccessHash: document.AccessHash, FileReference: document.FileReference})
+	} else if req.Thumbnail != "" {
+		document, err := inputDocumentFromFileID(req.Thumbnail)
+		if err != nil {
+			return false, err
+		}
+		request.SetThumb(document)
 	}
 	_, err := b.raw.StickersSetStickerSetThumb(ctx, request)
 	return err == nil, err

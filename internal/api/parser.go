@@ -106,6 +106,13 @@ func bindRequest(ctx *fasthttp.RequestCtx, target interface{}) error {
 		}
 	}
 
+	// Alias 'thumb' to 'thumbnail' for backward compatibility
+	if t, ok := data["thumb"]; ok {
+		if _, hasThumb := data["thumbnail"]; !hasThumb {
+			data["thumbnail"] = t
+		}
+	}
+
 	if len(data) == 0 && len(body) == 0 {
 		return nil
 	}

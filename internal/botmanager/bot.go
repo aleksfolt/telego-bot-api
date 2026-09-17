@@ -1295,16 +1295,83 @@ func (b *BotInstance) EditMessageMedia(ctx context.Context, req *converter.EditM
 		editReq.ReplyMarkup = markup
 	}
 
-	var mediaMap map[string]interface{}
-	if err := json.Unmarshal(req.Media, &mediaMap); err == nil {
-		if caption, ok := mediaMap["caption"].(string); ok && caption != "" {
-			editReq.Message = caption
+	var item converter.InputMediaItem
+	if err := json.Unmarshal(req.Media, &item); err == nil && item.Type != "" {
+		if inputMedia, err := b.resolveInputSingleMedia(ctx, peer, req.BusinessConnectionID, item, req.Files, req.FileNames); err == nil && inputMedia != nil {
+			editReq.Media = inputMedia
+		} else if err != nil {
+			return nil, fmt.Errorf("resolve edit media: %w", err)
+		}
+		caption := item.Caption
+		var entities []tg.MessageEntityClass
+		if len(item.CaptionEntities) > 0 {
+			entities = converter.ConvertEntities(item.CaptionEntities)
+		} else if item.ParseMode != "" {
+			if cleanCaption, parsedEntities, err := converter.ParseTextFormatting(item.Caption, item.ParseMode); err == nil {
+				caption = cleanCaption
+				entities = parsedEntities
+			}
+		}
+		editReq.Message = caption
+		editReq.Entities = entities
+	} else {
+		var mediaMap map[string]interface{}
+		if err := json.Unmarshal(req.Media, &mediaMap); err == nil {
+			if caption, ok := mediaMap["caption"].(string); ok && caption != "" {
+				editReq.Message = caption
+			}
 		}
 	}
 
-	_, err = b.raw.MessagesEditMessage(ctx, editReq)
-	if err != nil {
-		return nil, fmt.Errorf("mtproto edit media: %w", err)
+	var updates tg.UpdatesClass
+	if req.BusinessConnectionID != "" {
+		var box tg.UpdatesBox
+		err = b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
+			ConnectionID: req.BusinessConnectionID,
+			Query:        editReq,
+		}, &box)
+		if err != nil {
+			return nil, fmt.Errorf("mtproto business edit media: %w", err)
+		}
+		updates = box.Updates
+	} else {
+		updates, err = b.raw.MessagesEditMessage(ctx, editReq)
+		if err != nil {
+			return nil, fmt.Errorf("mtproto edit media: %w", err)
+		}
+	}
+
+	if updates != nil {
+		switch u := updates.(type) {
+		case *tg.Updates:
+			b.peers.IngestPeers(u.Users, u.Chats)
+			entities := converter.NewEntityContext(u.Users, u.Chats)
+			for _, upd := range u.Updates {
+				if msgUpd, ok := upd.(*tg.UpdateEditMessage); ok {
+					if msg, err := b.converter.ConvertMessage(msgUpd.Message, entities); err == nil && msg != nil {
+						return msg, nil
+					}
+				} else if msgUpd, ok := upd.(*tg.UpdateNewMessage); ok {
+					if msg, err := b.converter.ConvertMessage(msgUpd.Message, entities); err == nil && msg != nil {
+						return msg, nil
+					}
+				}
+			}
+		case *tg.UpdatesCombined:
+			b.peers.IngestPeers(u.Users, u.Chats)
+			entities := converter.NewEntityContext(u.Users, u.Chats)
+			for _, upd := range u.Updates {
+				if msgUpd, ok := upd.(*tg.UpdateEditMessage); ok {
+					if msg, err := b.converter.ConvertMessage(msgUpd.Message, entities); err == nil && msg != nil {
+						return msg, nil
+					}
+				} else if msgUpd, ok := upd.(*tg.UpdateNewMessage); ok {
+					if msg, err := b.converter.ConvertMessage(msgUpd.Message, entities); err == nil && msg != nil {
+						return msg, nil
+					}
+				}
+			}
+		}
 	}
 
 	return &converter.Message{
@@ -1312,6 +1379,7 @@ func (b *BotInstance) EditMessageMedia(ctx context.Context, req *converter.EditM
 		From:      b.GetMe(),
 		Chat:      converter.Chat{ID: req.ChatID},
 		Date:      int(time.Now().Unix()),
+		Caption:   editReq.Message,
 	}, nil
 }
 
@@ -1572,7 +1640,7 @@ func (b *BotInstance) SendVideo(ctx context.Context, req *converter.SendVideoReq
 		if err != nil {
 			return nil, fmt.Errorf("upload video bytes: %w", err)
 		}
-		media = &tg.InputMediaUploadedDocument{
+		docMedia := &tg.InputMediaUploadedDocument{
 			File:     inputFile,
 			MimeType: "video/mp4",
 			Spoiler:  req.HasSpoiler,
@@ -1585,6 +1653,12 @@ func (b *BotInstance) SendVideo(ctx context.Context, req *converter.SendVideoReq
 				},
 			},
 		}
+		if len(req.ThumbnailData) > 0 {
+			if thumbFile, err := u.FromBytes(ctx, "thumb.jpg", req.ThumbnailData); err == nil {
+				docMedia.SetThumb(thumbFile)
+			}
+		}
+		media = docMedia
 	} else if strings.HasPrefix(req.Video, "attach://") {
 		return nil, fmt.Errorf("attachment %q not found in request files", req.Video)
 	} else if isMediaURL(req.Video) {
@@ -1767,13 +1841,19 @@ func (b *BotInstance) SendDocument(ctx context.Context, req *converter.SendDocum
 				mimeType = http.DetectContentType(req.DocumentData)
 			}
 		}
-		media = &tg.InputMediaUploadedDocument{
+		docMedia := &tg.InputMediaUploadedDocument{
 			File:     inputFile,
 			MimeType: mimeType,
 			Attributes: []tg.DocumentAttributeClass{
 				&tg.DocumentAttributeFilename{FileName: fileName},
 			},
 		}
+		if len(req.ThumbnailData) > 0 {
+			if thumbFile, err := u.FromBytes(ctx, "thumb.jpg", req.ThumbnailData); err == nil {
+				docMedia.SetThumb(thumbFile)
+			}
+		}
+		media = docMedia
 	} else if strings.HasPrefix(req.Document, "attach://") {
 		return nil, fmt.Errorf("attachment %q not found in request files", req.Document)
 	} else if isMediaURL(req.Document) {
@@ -2043,7 +2123,7 @@ func (b *BotInstance) SendVideoNote(ctx context.Context, req *converter.SendVide
 		if err != nil {
 			return nil, fmt.Errorf("upload video note bytes: %w", err)
 		}
-		media = &tg.InputMediaUploadedDocument{
+		docMedia := &tg.InputMediaUploadedDocument{
 			File:     inputFile,
 			MimeType: "video/mp4",
 			Attributes: []tg.DocumentAttributeClass{
@@ -2055,6 +2135,12 @@ func (b *BotInstance) SendVideoNote(ctx context.Context, req *converter.SendVide
 				},
 			},
 		}
+		if len(req.ThumbnailData) > 0 {
+			if thumbFile, err := u.FromBytes(ctx, "thumb.jpg", req.ThumbnailData); err == nil {
+				docMedia.SetThumb(thumbFile)
+			}
+		}
+		media = docMedia
 	} else if strings.HasPrefix(req.VideoNote, "attach://") {
 		return nil, fmt.Errorf("attachment %q not found in request files", req.VideoNote)
 	} else if isMediaURL(req.VideoNote) {
@@ -2463,7 +2549,7 @@ func (b *BotInstance) SendAudio(ctx context.Context, req *converter.SendAudioReq
 		if err != nil {
 			return nil, fmt.Errorf("upload audio bytes: %w", err)
 		}
-		media = &tg.InputMediaUploadedDocument{
+		docMedia := &tg.InputMediaUploadedDocument{
 			File:     inputFile,
 			MimeType: "audio/mpeg",
 			Attributes: []tg.DocumentAttributeClass{
@@ -2474,6 +2560,12 @@ func (b *BotInstance) SendAudio(ctx context.Context, req *converter.SendAudioReq
 				},
 			},
 		}
+		if len(req.ThumbnailData) > 0 {
+			if thumbFile, err := u.FromBytes(ctx, "thumb.jpg", req.ThumbnailData); err == nil {
+				docMedia.SetThumb(thumbFile)
+			}
+		}
+		media = docMedia
 	} else if strings.HasPrefix(req.Audio, "attach://") {
 		return nil, fmt.Errorf("attachment %q not found in request files", req.Audio)
 	} else if isMediaURL(req.Audio) {
@@ -2722,7 +2814,7 @@ func (b *BotInstance) SendAnimation(ctx context.Context, req *converter.SendAnim
 		if err != nil {
 			return nil, fmt.Errorf("upload animation bytes: %w", err)
 		}
-		media = &tg.InputMediaUploadedDocument{
+		docMedia := &tg.InputMediaUploadedDocument{
 			File:     inputFile,
 			MimeType: "video/mp4",
 			Attributes: []tg.DocumentAttributeClass{
@@ -2734,6 +2826,12 @@ func (b *BotInstance) SendAnimation(ctx context.Context, req *converter.SendAnim
 				},
 			},
 		}
+		if len(req.ThumbnailData) > 0 {
+			if thumbFile, err := u.FromBytes(ctx, "thumb.jpg", req.ThumbnailData); err == nil {
+				docMedia.SetThumb(thumbFile)
+			}
+		}
+		media = docMedia
 	} else if strings.HasPrefix(req.Animation, "attach://") {
 		return nil, fmt.Errorf("attachment %q not found in request files", req.Animation)
 	} else if isMediaURL(req.Animation) {

@@ -634,7 +634,9 @@ func (s *Server) handleEditMessageMedia(ctx *fasthttp.RequestCtx, bot *botmanage
 		return
 	}
 
-	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	req.Files, req.FileNames = ExtractAllFilesFromRequest(ctx)
+
+	c, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	msg, err := bot.EditMessageMedia(c, &req)
@@ -944,6 +946,53 @@ func ExtractFileFromRequest(ctx *fasthttp.RequestCtx, fieldName, fieldValue stri
 	return nil, ""
 }
 
+// ExtractAllFilesFromRequest retrieves all uploaded files and filenames from fasthttp.RequestCtx.
+// It combines fasthttp.MultipartForm with a streaming fallback reader to ensure no parts are dropped
+// due to unquoted filenames, special characters (colons, spaces, etc.), or non-standard client formatting.
+func ExtractAllFilesFromRequest(ctx *fasthttp.RequestCtx) (map[string][]byte, map[string]string) {
+	files := make(map[string][]byte)
+	fileNames := make(map[string]string)
+
+	if mf, err := ctx.MultipartForm(); err == nil && mf != nil {
+		for name, fhs := range mf.File {
+			if len(fhs) > 0 {
+				fh := fhs[0]
+				if f, err := fh.Open(); err == nil {
+					if data, err := io.ReadAll(f); err == nil && len(data) > 0 {
+						files[name] = data
+						fileNames[name] = fh.Filename
+					}
+					_ = f.Close()
+				}
+			}
+		}
+	}
+
+	if boundary := ctx.Request.Header.MultipartFormBoundary(); len(boundary) > 0 {
+		mr := multipart.NewReader(bytes.NewReader(ctx.PostBody()), string(boundary))
+		for {
+			p, err := mr.NextPart()
+			if err != nil {
+				break
+			}
+			cd := p.Header.Get("Content-Disposition")
+			pName, pFilename := ParseContentDisposition(cd)
+			if pName != "" {
+				if _, exists := files[pName]; !exists {
+					if data, err := io.ReadAll(p); err == nil && len(data) > 0 {
+						if pFilename != "" || len(p.Header.Get("Content-Type")) > 0 {
+							files[pName] = data
+							fileNames[pName] = pFilename
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return files, fileNames
+}
+
 func (s *Server) handleSendPhoto(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
 	var req converter.SendPhotoRequest
 	if err := bindRequest(ctx, &req); err != nil {
@@ -993,6 +1042,9 @@ func (s *Server) handleSendVideo(ctx *fasthttp.RequestCtx, bot *botmanager.BotIn
 			req.VideoFileName = filename
 		}
 	}
+	if data, _ := ExtractFileFromRequest(ctx, "thumbnail", req.Thumbnail); len(data) > 0 {
+		req.ThumbnailData = data
+	}
 
 	if req.ChatID == 0 || (req.Video == "" && len(req.VideoData) == 0) {
 		s.respondError(ctx, 400, "Bad Request: chat_id and video are required")
@@ -1028,6 +1080,9 @@ func (s *Server) handleSendDocument(ctx *fasthttp.RequestCtx, bot *botmanager.Bo
 		if req.DocumentFileName == "" {
 			req.DocumentFileName = filename
 		}
+	}
+	if data, _ := ExtractFileFromRequest(ctx, "thumbnail", req.Thumbnail); len(data) > 0 {
+		req.ThumbnailData = data
 	}
 
 	if req.ChatID == 0 || (req.Document == "" && len(req.DocumentData) == 0) {
@@ -1101,6 +1156,9 @@ func (s *Server) handleSendVideoNote(ctx *fasthttp.RequestCtx, bot *botmanager.B
 			req.VideoNoteFileName = filename
 		}
 	}
+	if data, _ := ExtractFileFromRequest(ctx, "thumbnail", req.Thumbnail); len(data) > 0 {
+		req.ThumbnailData = data
+	}
 
 	if req.ChatID == 0 || (req.VideoNote == "" && len(req.VideoNoteData) == 0) {
 		s.respondError(ctx, 400, "Bad Request: chat_id and video_note are required")
@@ -1136,6 +1194,9 @@ func (s *Server) handleSendAudio(ctx *fasthttp.RequestCtx, bot *botmanager.BotIn
 		if req.AudioFileName == "" {
 			req.AudioFileName = filename
 		}
+	}
+	if data, _ := ExtractFileFromRequest(ctx, "thumbnail", req.Thumbnail); len(data) > 0 {
+		req.ThumbnailData = data
 	}
 
 	if req.ChatID == 0 || (req.Audio == "" && len(req.AudioData) == 0) {
@@ -1208,6 +1269,9 @@ func (s *Server) handleSendAnimation(ctx *fasthttp.RequestCtx, bot *botmanager.B
 		if req.AnimationFileName == "" {
 			req.AnimationFileName = filename
 		}
+	}
+	if data, _ := ExtractFileFromRequest(ctx, "thumbnail", req.Thumbnail); len(data) > 0 {
+		req.ThumbnailData = data
 	}
 
 	if req.ChatID == 0 || (req.Animation == "" && len(req.AnimationData) == 0) {
@@ -1392,46 +1456,7 @@ func (s *Server) handleSendMediaGroup(ctx *fasthttp.RequestCtx, bot *botmanager.
 		return
 	}
 
-	if mf, err := ctx.MultipartForm(); err == nil && mf != nil {
-		req.Files = make(map[string][]byte)
-		req.FileNames = make(map[string]string)
-		for name, fhs := range mf.File {
-			if len(fhs) > 0 {
-				fh := fhs[0]
-				if f, err := fh.Open(); err == nil {
-					if data, err := io.ReadAll(f); err == nil {
-						req.Files[name] = data
-						req.FileNames[name] = fh.Filename
-					}
-					_ = f.Close()
-				}
-			}
-		}
-	}
-
-	if boundary := ctx.Request.Header.MultipartFormBoundary(); len(boundary) > 0 {
-		mr := multipart.NewReader(bytes.NewReader(ctx.PostBody()), string(boundary))
-		if req.Files == nil {
-			req.Files = make(map[string][]byte)
-			req.FileNames = make(map[string]string)
-		}
-		for {
-			p, err := mr.NextPart()
-			if err != nil {
-				break
-			}
-			cd := p.Header.Get("Content-Disposition")
-			pName, pFilename := ParseContentDisposition(cd)
-			if pName != "" {
-				if _, exists := req.Files[pName]; !exists {
-					if data, err := io.ReadAll(p); err == nil && len(data) > 0 {
-						req.Files[pName] = data
-						req.FileNames[pName] = pFilename
-					}
-				}
-			}
-		}
-	}
+	req.Files, req.FileNames = ExtractAllFilesFromRequest(ctx)
 
 	if req.ChatID == 0 || len(req.Media) == 0 {
 		s.respondError(ctx, 400, "Bad Request: chat_id and media are required")
@@ -1497,48 +1522,8 @@ func (s *Server) handlePostStory(ctx *fasthttp.RequestCtx, bot *botmanager.BotIn
 		s.respondError(ctx, 400, "Bad Request: "+err.Error())
 		return
 	}
-	if mf, err := ctx.MultipartForm(); err == nil && mf != nil {
-		req.Files = make(map[string][]byte)
-		req.FileNames = make(map[string]string)
-		for name, fhs := range mf.File {
-			if len(fhs) == 0 {
-				continue
-			}
-			file, err := fhs[0].Open()
-			if err != nil {
-				continue
-			}
-			data, readErr := io.ReadAll(file)
-			_ = file.Close()
-			if readErr == nil {
-				req.Files[name], req.FileNames[name] = data, fhs[0].Filename
-			}
-		}
-	}
 
-	if boundary := ctx.Request.Header.MultipartFormBoundary(); len(boundary) > 0 {
-		mr := multipart.NewReader(bytes.NewReader(ctx.PostBody()), string(boundary))
-		if req.Files == nil {
-			req.Files = make(map[string][]byte)
-			req.FileNames = make(map[string]string)
-		}
-		for {
-			p, err := mr.NextPart()
-			if err != nil {
-				break
-			}
-			cd := p.Header.Get("Content-Disposition")
-			pName, pFilename := ParseContentDisposition(cd)
-			if pName != "" {
-				if _, exists := req.Files[pName]; !exists {
-					if data, err := io.ReadAll(p); err == nil && len(data) > 0 {
-						req.Files[pName] = data
-						req.FileNames[pName] = pFilename
-					}
-				}
-			}
-		}
-	}
+	req.Files, req.FileNames = ExtractAllFilesFromRequest(ctx)
 	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

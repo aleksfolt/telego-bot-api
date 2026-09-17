@@ -61,3 +61,38 @@ func TestBindRequestNestedJSONInForm(t *testing.T) {
 	assert.NotEmpty(t, req.ReplyMarkup)
 	assert.Contains(t, string(req.ReplyMarkup), "callback_data")
 }
+
+func TestParseContentDisposition(t *testing.T) {
+	// Standard quoted format
+	cd1 := `form-data; name="document"; filename="file.pdf"`
+	name1, fn1 := ParseContentDisposition(cd1)
+	assert.Equal(t, "document", name1)
+	assert.Equal(t, "file.pdf", fn1)
+
+	// Unquoted format with colons and URLs (e.g. grammY / web clients)
+	cd2 := `form-data; name="ihxt8gcjii1n6hln"; filename=blob:http://localhost:5173/bf02517d-e64e-4866-9903-820847cf57c9`
+	name2, fn2 := ParseContentDisposition(cd2)
+	assert.Equal(t, "ihxt8gcjii1n6hln", name2)
+	assert.Equal(t, "blob:http://localhost:5173/bf02517d-e64e-4866-9903-820847cf57c9", fn2)
+
+	// Unquoted filename without quotes and extra semicolons
+	cd3 := `form-data; name=photo; filename=test.jpg; size=1234`
+	name3, fn3 := ParseContentDisposition(cd3)
+	assert.Equal(t, "photo", name3)
+	assert.Equal(t, "test.jpg", fn3)
+}
+
+func TestBindRequestThumbnailAlias(t *testing.T) {
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod("POST")
+	ctx.Request.Header.SetContentType("application/x-www-form-urlencoded")
+	ctx.Request.SetBodyString(`chat_id=12345&document=attach://doc1&thumb=attach://thumb1`)
+
+	var req converter.SendDocumentRequest
+	err := bindRequest(ctx, &req)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(12345), req.ChatID)
+	assert.Equal(t, "attach://doc1", req.Document)
+	assert.Equal(t, "attach://thumb1", req.Thumbnail)
+}
+
