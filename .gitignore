@@ -2,6 +2,7 @@
 telego-server
 telego-server.*
 telego-bot-api-server
+/stresstest
 *.exe
 *.exe~
 *.dll
