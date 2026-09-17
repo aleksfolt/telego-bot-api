@@ -20,6 +20,7 @@ type Config struct {
 	LogFormat     string
 	MTProtoDebug  bool
 	PprofAddr     string
+	WarmupAll     bool
 }
 
 // Load loads configuration from environment variables and command-line flags.
@@ -74,6 +75,9 @@ func Load() *Config {
 	if val := getEnv("TELEGO_PPROF_ADDR", "PPROF_ADDR"); val != "" {
 		cfg.PprofAddr = val
 	}
+	if val := getEnv("TELEGO_WARMUP_ALL", "WARMUP_ALL"); val == "true" || val == "1" {
+		cfg.WarmupAll = true
+	}
 
 	var ipsFlag string
 	flag.IntVar(&cfg.AppID, "api-id", cfg.AppID, "Telegram API ID (from my.telegram.org)")
@@ -87,6 +91,7 @@ func Load() *Config {
 	flag.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "Log format: console (human-readable colors) or json (production)")
 	flag.BoolVar(&cfg.MTProtoDebug, "mtproto-debug", cfg.MTProtoDebug, "Enable verbose wire-level MTProto transport debug dumps (default: false)")
 	flag.StringVar(&cfg.PprofAddr, "pprof-addr", cfg.PprofAddr, "Optional address for pprof HTTP server (e.g. 127.0.0.1:6060)")
+	flag.BoolVar(&cfg.WarmupAll, "warmup-all", cfg.WarmupAll, "Warm up all registered bots in background (default: false, lazy on-demand like official telegram-bot-api)")
 	flag.Parse()
 
 	if ipsFlag != "" {
