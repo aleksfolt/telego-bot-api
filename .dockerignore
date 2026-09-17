@@ -1,0 +1,10 @@
+.git
+.gitignore
+telego-server
+telego-bot-api-server
+bin/
+tmp/
+*.log
+tests/
+.env
+.env.*
