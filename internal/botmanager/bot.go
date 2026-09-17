@@ -106,6 +106,16 @@ func NewBotInstance(
 	}
 	bot.lastActive.Store(time.Now().UnixNano())
 
+	// Try loading cached profile from Redis for instant getMe responses
+	if cachedProfile, err := redisStore.GetBotProfile(context.Background(), token); err == nil && len(cachedProfile) > 0 {
+		var user converter.User
+		if err := json.Unmarshal(cachedProfile, &user); err == nil {
+			bot.self = &user
+			bot.lastSelfRefresh = time.Now()
+			bot.converter.SetSelfUserID(user.ID)
+		}
+	}
+
 	opts := telegram.Options{
 		SessionStorage: redisStore.SessionStorage(token),
 		UpdateHandler:  bot,
@@ -152,14 +162,24 @@ func (b *BotInstance) Start(ctx context.Context) error {
 				backoff = 1 * time.Second
 				b.raw = b.client.API()
 
-				// Authenticate bot using token
-				auth, err := b.client.Auth().Bot(runCtx, b.token)
-				if err != nil {
-					return fmt.Errorf("bot auth failed: %w", err)
+				var user *tg.User
+				// Fast path: check if existing session from Redis is already authorized
+				status, statusErr := b.client.Auth().Status(runCtx)
+				if statusErr == nil && status != nil && status.Authorized && status.User != nil {
+					user = status.User
+					b.logger.Debug("Reused existing session authorization", zap.String("username", user.Username))
+				} else {
+					// Authenticate bot using token
+					auth, err := b.client.Auth().Bot(runCtx, b.token)
+					if err != nil {
+						return fmt.Errorf("bot auth failed: %w", err)
+					}
+					if u, ok := auth.User.AsNotEmpty(); ok {
+						user = u
+					}
 				}
 
-				user, ok := auth.User.AsNotEmpty()
-				if ok {
+				if user != nil {
 					canConnectBusiness := user.GetBotBusiness() || os.Getenv("TELEGO_FORCE_BUSINESS_MODE") == "true"
 					canManageBots := user.GetBotCanManageBots()
 					b.mu.Lock()
@@ -184,6 +204,12 @@ func (b *BotInstance) Start(ctx context.Context) error {
 					b.lastSelfRefresh = time.Now()
 					b.converter.SetSelfUserID(user.ID)
 					b.mu.Unlock()
+
+					// Cache profile in Redis
+					if data, err := json.Marshal(b.self); err == nil {
+						_ = b.redisStore.SaveBotProfile(context.Background(), b.token, data)
+					}
+
 					b.logger.Info("Bot connected and authorized",
 						zap.String("username", user.Username),
 						zap.Int64("id", user.ID),
@@ -756,6 +782,12 @@ func (b *BotInstance) RefreshMe(ctx context.Context) *converter.User {
 				}
 				b.converter.SetSelfUserID(u.ID)
 				b.mu.Unlock()
+
+				// Cache profile in Redis
+				if data, err := json.Marshal(b.self); err == nil {
+					_ = b.redisStore.SaveBotProfile(context.Background(), b.token, data)
+				}
+
 				b.logger.Info("Refreshed bot profile",
 					zap.String("username", u.Username),
 					zap.Bool("can_connect_to_business", canConnectBusiness),
@@ -766,16 +798,18 @@ func (b *BotInstance) RefreshMe(ctx context.Context) *converter.User {
 	return b.GetMe()
 }
 
-// GetOrRefreshMe returns bot profile information, refreshing from MTProto if older than 10s,
-// or if can_connect_to_business is false/missing and >2s since last check (to pick up BotFather changes quickly).
+// GetOrRefreshMe returns bot profile information. If profile is already cached in memory,
+// it returns immediately in microseconds without blocking on MTProto network round-trips.
 func (b *BotInstance) GetOrRefreshMe(ctx context.Context) *converter.User {
 	b.mu.RLock()
-	needRefresh := b.self == nil ||
-		time.Since(b.lastSelfRefresh) > 10*time.Second ||
-		((b.self.CanConnectToBusiness == nil || !*b.self.CanConnectToBusiness) && time.Since(b.lastSelfRefresh) > 2*time.Second)
+	self := b.self
 	b.mu.RUnlock()
 
-	if needRefresh && b.raw != nil {
+	if self != nil {
+		return self
+	}
+
+	if b.raw != nil {
 		return b.RefreshMe(ctx)
 	}
 	return b.GetMe()
