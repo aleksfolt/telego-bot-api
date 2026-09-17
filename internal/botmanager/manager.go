@@ -18,6 +18,7 @@ import (
 type Manager struct {
 	mu            sync.RWMutex
 	bots          map[string]*BotInstance
+	flight        *botFlight
 	cfg           *config.Config
 	redisStore    *storage.RedisStore
 	dispatcher    *webhook.Dispatcher
@@ -37,6 +38,7 @@ func NewManager(cfg *config.Config, rdb *storage.RedisStore, dispatcher *webhook
 
 	m := &Manager{
 		bots:          make(map[string]*BotInstance),
+		flight:        newBotFlight(),
 		cfg:           cfg,
 		redisStore:    rdb,
 		dispatcher:    dispatcher,
@@ -51,41 +53,88 @@ func NewManager(cfg *config.Config, rdb *storage.RedisStore, dispatcher *webhook
 	return m
 }
 
-// LoadAndStartAll restores all registered bots from Redis and runs them 24/7.
+// LoadAndStartAll restores active bot sessions from Redis.
+// It prioritizes bots with active webhooks first (concurrency 50),
+// then warms up any remaining registered polling bots in the background without blocking API traffic.
 func (m *Manager) LoadAndStartAll(ctx context.Context) error {
+	webhookTokens, err := m.redisStore.GetWebhookTokens(ctx)
+	if err != nil {
+		m.logger.Warn("Failed to read webhook bots from Redis", zap.Error(err))
+	}
+
+	webhookSet := make(map[string]struct{}, len(webhookTokens))
+	for _, t := range webhookTokens {
+		webhookSet[t] = struct{}{}
+	}
+
+	if len(webhookTokens) > 0 {
+		m.logger.Info("Restoring active webhook bots from Redis", zap.Int("count", len(webhookTokens)))
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 50)
+
+		for _, token := range webhookTokens {
+			wg.Add(1)
+			go func(t string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				botCtx, cancel := context.WithCancel(context.Background())
+				_ = cancel
+				if _, err := m.GetOrCreate(botCtx, t); err != nil {
+					m.logger.Warn("Failed to restore webhook bot session", zap.String("token_prefix", t[:min(10, len(t))]), zap.Error(err))
+				}
+			}(token)
+		}
+		wg.Wait()
+		m.logger.Info("All webhook bots restored and listening for updates", zap.Int("active_webhooks", len(webhookTokens)))
+	}
+
+	// Background non-blocking warm-up for remaining registered bots
 	tokens, err := m.redisStore.GetRegisteredBots(ctx)
 	if err != nil {
 		return fmt.Errorf("read bots from redis: %w", err)
 	}
 
-	m.logger.Info("Restoring active bot sessions from Redis", zap.Int("count", len(tokens)))
-
-	var wg sync.WaitGroup
-	// Concurrency limiter for startup burst
-	semaphore := make(chan struct{}, 50)
-
-	for _, token := range tokens {
-		wg.Add(1)
-		go func(t string) {
-			defer wg.Done()
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-
-			botCtx, cancel := context.WithCancel(context.Background())
-			_ = cancel // preserved in BotInstance
-			if _, err := m.GetOrCreate(botCtx, t); err != nil {
-				m.logger.Warn("Failed to restore bot session", zap.String("token_prefix", t[:min(10, len(t))]), zap.Error(err))
-			}
-		}(token)
+	var remaining []string
+	for _, t := range tokens {
+		if _, isWebhook := webhookSet[t]; !isWebhook {
+			remaining = append(remaining, t)
+		}
 	}
 
-	wg.Wait()
-	m.logger.Info("All registered bots restored and listening for updates")
+	if len(remaining) > 0 {
+		m.logger.Info("Starting background warm-up of registered bots", zap.Int("count", len(remaining)))
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 50)
+
+		for _, token := range remaining {
+			wg.Add(1)
+			go func(t string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				botCtx, cancel := context.WithCancel(context.Background())
+				_ = cancel
+				if _, err := m.GetOrCreate(botCtx, t); err != nil {
+					m.logger.Debug("Failed to warm up bot session", zap.String("token_prefix", t[:min(10, len(t))]), zap.Error(err))
+				}
+			}(token)
+		}
+		wg.Wait()
+		m.logger.Info("Completed registered bots warm-up", zap.Int("total_active_bots", len(m.bots)))
+	}
+
 	return nil
 }
 
 // GetOrCreate returns an existing bot instance or initializes a new one.
+// Fast path is lock-free reading. Slow path uses singleflight so that multiple
+// requests for DIFFERENT bots initialize completely concurrently in parallel,
+// and m.mu is never held during network connection to Telegram.
 func (m *Manager) GetOrCreate(ctx context.Context, token string) (*BotInstance, error) {
+	// 1. Fast path: check already-active bots
 	m.mu.RLock()
 	bot, ok := m.bots[token]
 	m.mu.RUnlock()
@@ -94,29 +143,37 @@ func (m *Manager) GetOrCreate(ctx context.Context, token string) (*BotInstance, 
 		return bot, nil
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	// 2. Slow path: singleflight guarantees only 1 goroutine initializes this token,
+	// while different tokens initialize concurrently in parallel without ANY global lock contention!
+	return m.flight.Do(token, func() (*BotInstance, error) {
+		// Double check under read lock
+		m.mu.RLock()
+		bot, ok := m.bots[token]
+		m.mu.RUnlock()
+		if ok {
+			bot.touch()
+			return bot, nil
+		}
 
-	// Double-check under write lock
-	if bot, ok = m.bots[token]; ok {
-		bot.touch()
+		if m.cfg.AppID == 0 || m.cfg.AppHash == "" {
+			return nil, fmt.Errorf("TELEGRAM_API_ID and TELEGRAM_API_HASH must be configured")
+		}
+
+		bot = NewBotInstance(token, m.cfg.AppID, m.cfg.AppHash, m.dispatcher, m.redisStore, m.logger, m.dialer, m.cfg.MTProtoDebug)
+		// Connect to Telegram MTProto in parallel — NO global mutex is held!
+		if err := bot.Start(ctx); err != nil {
+			return nil, fmt.Errorf("start bot session: %w", err)
+		}
+
+		// Store in map: write lock held for only ~10 nanoseconds
+		m.mu.Lock()
+		m.bots[token] = bot
+		m.mu.Unlock()
+
+		_ = m.redisStore.RegisterBot(context.Background(), token)
+		m.logger.Info("Registered active bot", zap.Int("total_active_bots", len(m.bots)))
 		return bot, nil
-	}
-
-	if m.cfg.AppID == 0 || m.cfg.AppHash == "" {
-		return nil, fmt.Errorf("TELEGRAM_API_ID and TELEGRAM_API_HASH must be configured")
-	}
-
-	bot = NewBotInstance(token, m.cfg.AppID, m.cfg.AppHash, m.dispatcher, m.redisStore, m.logger, m.dialer, m.cfg.MTProtoDebug)
-	if err := bot.Start(ctx); err != nil {
-		return nil, fmt.Errorf("start bot session: %w", err)
-	}
-
-	m.bots[token] = bot
-	_ = m.redisStore.RegisterBot(context.Background(), token)
-
-	m.logger.Info("Registered active bot", zap.Int("total_active_bots", len(m.bots)))
-	return bot, nil
+	})
 }
 
 // Get returns an existing bot instance if registered and notifies it of activity.
