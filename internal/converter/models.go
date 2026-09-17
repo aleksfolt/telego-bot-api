@@ -19,19 +19,23 @@ type ApiResponse struct {
 
 // User represents a Telegram user or bot.
 type User struct {
-	ID                      int64  `json:"id"`
-	IsBot                   bool   `json:"is_bot"`
-	FirstName               string `json:"first_name"`
-	LastName                string `json:"last_name,omitempty"`
-	Username                string `json:"username,omitempty"`
-	LanguageCode            string `json:"language_code,omitempty"`
-	IsPremium               bool   `json:"is_premium,omitempty"`
-	CanJoinGroups           bool   `json:"can_join_groups,omitempty"`
-	CanReadAllGroupMessages bool   `json:"can_read_all_group_messages,omitempty"`
-	SupportsInlineQueries   bool   `json:"supports_inline_queries,omitempty"`
-	CanConnectToBusiness    *bool  `json:"can_connect_to_business,omitempty"`
-	HasMainWebApp           bool   `json:"has_main_web_app,omitempty"`
-	CanManageBots           *bool  `json:"can_manage_bots,omitempty"`
+	ID                         int64  `json:"id"`
+	IsBot                      bool   `json:"is_bot"`
+	FirstName                  string `json:"first_name"`
+	LastName                   string `json:"last_name,omitempty"`
+	Username                   string `json:"username,omitempty"`
+	LanguageCode               string `json:"language_code,omitempty"`
+	IsPremium                  bool   `json:"is_premium,omitempty"`
+	CanJoinGroups              bool   `json:"can_join_groups,omitempty"`
+	CanReadAllGroupMessages    bool   `json:"can_read_all_group_messages,omitempty"`
+	SupportsInlineQueries      bool   `json:"supports_inline_queries,omitempty"`
+	SupportsGuestQueries       bool   `json:"supports_guest_queries,omitempty"`
+	CanConnectToBusiness       *bool  `json:"can_connect_to_business,omitempty"`
+	HasMainWebApp              bool   `json:"has_main_web_app,omitempty"`
+	HasTopicsEnabled           bool   `json:"has_topics_enabled,omitempty"`
+	AllowsUsersToCreateTopics  bool   `json:"allows_users_to_create_topics,omitempty"`
+	CanManageBots              *bool  `json:"can_manage_bots,omitempty"`
+	SupportsJoinRequestQueries bool   `json:"supports_join_request_queries,omitempty"`
 }
 
 // BoolPtr returns a pointer to the given bool.
@@ -452,14 +456,15 @@ type EditMessageTextRequest struct {
 
 // EditMessageCaptionRequest represents parameters for editMessageCaption.
 type EditMessageCaptionRequest struct {
-	BusinessConnectionID string          `json:"business_connection_id,omitempty"`
-	ChatID               int64           `json:"chat_id,omitempty"`
-	MessageID            int64           `json:"message_id,omitempty"`
-	InlineMsgID          string          `json:"inline_message_id,omitempty"`
-	Caption              string          `json:"caption,omitempty"`
-	ParseMode            string          `json:"parse_mode,omitempty"`
-	CaptionEntities      []MessageEntity `json:"caption_entities,omitempty"`
-	ReplyMarkup          json.RawMessage `json:"reply_markup,omitempty"`
+	BusinessConnectionID  string          `json:"business_connection_id,omitempty"`
+	ChatID                int64           `json:"chat_id,omitempty"`
+	MessageID             int64           `json:"message_id,omitempty"`
+	InlineMsgID           string          `json:"inline_message_id,omitempty"`
+	Caption               string          `json:"caption,omitempty"`
+	ParseMode             string          `json:"parse_mode,omitempty"`
+	CaptionEntities       []MessageEntity `json:"caption_entities,omitempty"`
+	ShowCaptionAboveMedia bool            `json:"show_caption_above_media,omitempty"`
+	ReplyMarkup           json.RawMessage `json:"reply_markup,omitempty"`
 }
 
 // EditMessageReplyMarkupRequest represents parameters for editMessageReplyMarkup.
@@ -493,24 +498,29 @@ type DeleteMessageRequest struct {
 
 // SendChatActionRequest represents parameters for sendChatAction.
 type SendChatActionRequest struct {
-	ChatID          int64  `json:"chat_id"`
-	MessageThreadID int    `json:"message_thread_id,omitempty"`
-	Action          string `json:"action"`
+	BusinessConnectionID string `json:"business_connection_id,omitempty"`
+	ChatID               int64  `json:"chat_id"`
+	MessageThreadID      int    `json:"message_thread_id,omitempty"`
+	Action               string `json:"action"`
 }
 
 // CopyMessageRequest represents parameters for copyMessage.
 type CopyMessageRequest struct {
-	ChatID           int64            `json:"chat_id"`
-	MessageThreadID  int              `json:"message_thread_id,omitempty"`
-	FromChatID       int64            `json:"from_chat_id"`
-	MessageID        int64            `json:"message_id"`
-	Caption          string           `json:"caption,omitempty"`
-	ParseMode        string           `json:"parse_mode,omitempty"`
-	CaptionEntities  []MessageEntity  `json:"caption_entities,omitempty"`
-	ProtectContent   bool             `json:"protect_content,omitempty"`
-	ReplyToMessageID int64            `json:"reply_to_message_id,omitempty"`
-	ReplyParameters  *ReplyParameters `json:"reply_parameters,omitempty"`
-	ReplyMarkup      json.RawMessage  `json:"reply_markup,omitempty"`
+	ChatID                int64            `json:"chat_id"`
+	MessageThreadID       int              `json:"message_thread_id,omitempty"`
+	FromChatID            int64            `json:"from_chat_id"`
+	MessageID             int64            `json:"message_id"`
+	Caption               string           `json:"caption,omitempty"`
+	ParseMode             string           `json:"parse_mode,omitempty"`
+	CaptionEntities       []MessageEntity  `json:"caption_entities,omitempty"`
+	ShowCaptionAboveMedia bool             `json:"show_caption_above_media,omitempty"`
+	DisableNotification   bool             `json:"disable_notification,omitempty"`
+	ProtectContent        bool             `json:"protect_content,omitempty"`
+	AllowPaidBroadcast    bool             `json:"allow_paid_broadcast,omitempty"`
+	VideoStartTimestamp   int              `json:"video_start_timestamp,omitempty"`
+	ReplyToMessageID      int64            `json:"reply_to_message_id,omitempty"`
+	ReplyParameters       *ReplyParameters `json:"reply_parameters,omitempty"`
+	ReplyMarkup           json.RawMessage  `json:"reply_markup,omitempty"`
 }
 
 // AnswerCallbackQueryRequest represents parameters for answerCallbackQuery.
@@ -580,24 +590,29 @@ type SendPhotoRequest struct {
 
 // SendVideoRequest represents parameters for sendVideo.
 type SendVideoRequest struct {
-	BusinessConnectionID string           `json:"business_connection_id,omitempty"`
-	ChatID               int64            `json:"chat_id"`
-	MessageThreadID      int              `json:"message_thread_id,omitempty"`
-	Video                string           `json:"video"`
-	Thumbnail            string           `json:"thumbnail,omitempty"`
-	Duration             int              `json:"duration,omitempty"`
-	Width                int              `json:"width,omitempty"`
-	Height               int              `json:"height,omitempty"`
-	Caption              string           `json:"caption,omitempty"`
-	ParseMode            string           `json:"parse_mode,omitempty"`
-	CaptionEntities      []MessageEntity  `json:"caption_entities,omitempty"`
-	HasSpoiler           bool             `json:"has_spoiler,omitempty"`
-	SupportsStreaming    bool             `json:"supports_streaming,omitempty"`
-	DisableNotification  bool             `json:"disable_notification,omitempty"`
-	ProtectContent       bool             `json:"protect_content,omitempty"`
-	ReplyToMessageID     int64            `json:"reply_to_message_id,omitempty"`
-	ReplyParameters      *ReplyParameters `json:"reply_parameters,omitempty"`
-	ReplyMarkup          json.RawMessage  `json:"reply_markup,omitempty"`
+	BusinessConnectionID  string           `json:"business_connection_id,omitempty"`
+	ChatID                int64            `json:"chat_id"`
+	MessageThreadID       int              `json:"message_thread_id,omitempty"`
+	Video                 string           `json:"video"`
+	Thumbnail             string           `json:"thumbnail,omitempty"`
+	Cover                 string           `json:"cover,omitempty"`
+	StartTimestamp        int              `json:"start_timestamp,omitempty"`
+	Duration              int              `json:"duration,omitempty"`
+	Width                 int              `json:"width,omitempty"`
+	Height                int              `json:"height,omitempty"`
+	Caption               string           `json:"caption,omitempty"`
+	ParseMode             string           `json:"parse_mode,omitempty"`
+	CaptionEntities       []MessageEntity  `json:"caption_entities,omitempty"`
+	ShowCaptionAboveMedia bool             `json:"show_caption_above_media,omitempty"`
+	HasSpoiler            bool             `json:"has_spoiler,omitempty"`
+	SupportsStreaming     bool             `json:"supports_streaming,omitempty"`
+	DisableNotification   bool             `json:"disable_notification,omitempty"`
+	ProtectContent        bool             `json:"protect_content,omitempty"`
+	AllowPaidBroadcast    bool             `json:"allow_paid_broadcast,omitempty"`
+	MessageEffectID       string           `json:"message_effect_id,omitempty"`
+	ReplyToMessageID      int64            `json:"reply_to_message_id,omitempty"`
+	ReplyParameters       *ReplyParameters `json:"reply_parameters,omitempty"`
+	ReplyMarkup           json.RawMessage  `json:"reply_markup,omitempty"`
 
 	ThumbnailData []byte `json:"-"`
 	VideoData     []byte `json:"-"`
@@ -617,6 +632,8 @@ type SendDocumentRequest struct {
 	DisableContentTypeDetection bool             `json:"disable_content_type_detection,omitempty"`
 	DisableNotification         bool             `json:"disable_notification,omitempty"`
 	ProtectContent              bool             `json:"protect_content,omitempty"`
+	AllowPaidBroadcast          bool             `json:"allow_paid_broadcast,omitempty"`
+	MessageEffectID             string           `json:"message_effect_id,omitempty"`
 	ReplyToMessageID            int64            `json:"reply_to_message_id,omitempty"`
 	ReplyParameters             *ReplyParameters `json:"reply_parameters,omitempty"`
 	ReplyMarkup                 json.RawMessage  `json:"reply_markup,omitempty"`
@@ -638,6 +655,8 @@ type SendVoiceRequest struct {
 	Duration             int              `json:"duration,omitempty"`
 	DisableNotification  bool             `json:"disable_notification,omitempty"`
 	ProtectContent       bool             `json:"protect_content,omitempty"`
+	AllowPaidBroadcast   bool             `json:"allow_paid_broadcast,omitempty"`
+	MessageEffectID      string           `json:"message_effect_id,omitempty"`
 	ReplyToMessageID     int64            `json:"reply_to_message_id,omitempty"`
 	ReplyParameters      *ReplyParameters `json:"reply_parameters,omitempty"`
 	ReplyMarkup          json.RawMessage  `json:"reply_markup,omitempty"`
@@ -661,6 +680,8 @@ type SendAudioRequest struct {
 	Title                string           `json:"title,omitempty"`
 	DisableNotification  bool             `json:"disable_notification,omitempty"`
 	ProtectContent       bool             `json:"protect_content,omitempty"`
+	AllowPaidBroadcast   bool             `json:"allow_paid_broadcast,omitempty"`
+	MessageEffectID      string           `json:"message_effect_id,omitempty"`
 	ReplyToMessageID     int64            `json:"reply_to_message_id,omitempty"`
 	ReplyParameters      *ReplyParameters `json:"reply_parameters,omitempty"`
 	ReplyMarkup          json.RawMessage  `json:"reply_markup,omitempty"`
@@ -672,23 +693,26 @@ type SendAudioRequest struct {
 
 // SendAnimationRequest represents parameters for sendAnimation.
 type SendAnimationRequest struct {
-	BusinessConnectionID string           `json:"business_connection_id,omitempty"`
-	ChatID               int64            `json:"chat_id"`
-	MessageThreadID      int              `json:"message_thread_id,omitempty"`
-	Animation            string           `json:"animation"`
-	Thumbnail            string           `json:"thumbnail,omitempty"`
-	Duration             int              `json:"duration,omitempty"`
-	Width                int              `json:"width,omitempty"`
-	Height               int              `json:"height,omitempty"`
-	Caption              string           `json:"caption,omitempty"`
-	ParseMode            string           `json:"parse_mode,omitempty"`
-	CaptionEntities      []MessageEntity  `json:"caption_entities,omitempty"`
-	HasSpoiler           bool             `json:"has_spoiler,omitempty"`
-	DisableNotification  bool             `json:"disable_notification,omitempty"`
-	ProtectContent       bool             `json:"protect_content,omitempty"`
-	ReplyToMessageID     int64            `json:"reply_to_message_id,omitempty"`
-	ReplyParameters      *ReplyParameters `json:"reply_parameters,omitempty"`
-	ReplyMarkup          json.RawMessage  `json:"reply_markup,omitempty"`
+	BusinessConnectionID  string           `json:"business_connection_id,omitempty"`
+	ChatID                int64            `json:"chat_id"`
+	MessageThreadID       int              `json:"message_thread_id,omitempty"`
+	Animation             string           `json:"animation"`
+	Thumbnail             string           `json:"thumbnail,omitempty"`
+	Duration              int              `json:"duration,omitempty"`
+	Width                 int              `json:"width,omitempty"`
+	Height                int              `json:"height,omitempty"`
+	Caption               string           `json:"caption,omitempty"`
+	ParseMode             string           `json:"parse_mode,omitempty"`
+	CaptionEntities       []MessageEntity  `json:"caption_entities,omitempty"`
+	ShowCaptionAboveMedia bool             `json:"show_caption_above_media,omitempty"`
+	HasSpoiler            bool             `json:"has_spoiler,omitempty"`
+	DisableNotification   bool             `json:"disable_notification,omitempty"`
+	ProtectContent        bool             `json:"protect_content,omitempty"`
+	AllowPaidBroadcast    bool             `json:"allow_paid_broadcast,omitempty"`
+	MessageEffectID       string           `json:"message_effect_id,omitempty"`
+	ReplyToMessageID      int64            `json:"reply_to_message_id,omitempty"`
+	ReplyParameters       *ReplyParameters `json:"reply_parameters,omitempty"`
+	ReplyMarkup           json.RawMessage  `json:"reply_markup,omitempty"`
 
 	ThumbnailData     []byte `json:"-"`
 	AnimationData     []byte `json:"-"`
@@ -706,6 +730,8 @@ type SendVideoNoteRequest struct {
 	Length               int              `json:"length,omitempty"`
 	DisableNotification  bool             `json:"disable_notification,omitempty"`
 	ProtectContent       bool             `json:"protect_content,omitempty"`
+	AllowPaidBroadcast   bool             `json:"allow_paid_broadcast,omitempty"`
+	MessageEffectID      string           `json:"message_effect_id,omitempty"`
 	ReplyToMessageID     int64            `json:"reply_to_message_id,omitempty"`
 	ReplyParameters      *ReplyParameters `json:"reply_parameters,omitempty"`
 	ReplyMarkup          json.RawMessage  `json:"reply_markup,omitempty"`
@@ -724,6 +750,7 @@ type SendStickerRequest struct {
 	Emoji                string           `json:"emoji,omitempty"`
 	DisableNotification  bool             `json:"disable_notification,omitempty"`
 	ProtectContent       bool             `json:"protect_content,omitempty"`
+	MessageEffectID      string           `json:"message_effect_id,omitempty"`
 	ReplyToMessageID     int64            `json:"reply_to_message_id,omitempty"`
 	ReplyParameters      *ReplyParameters `json:"reply_parameters,omitempty"`
 	ReplyMarkup          json.RawMessage  `json:"reply_markup,omitempty"`
@@ -802,15 +829,44 @@ type InputMediaItem struct {
 
 // SendMediaGroupRequest represents parameters for sendMediaGroup.
 type SendMediaGroupRequest struct {
-	BusinessConnectionID string            `json:"business_connection_id,omitempty"`
-	ChatID               int64             `json:"chat_id"`
-	MessageThreadID      int               `json:"message_thread_id,omitempty"`
-	Media                json.RawMessage   `json:"media"`
-	DisableNotification  bool              `json:"disable_notification,omitempty"`
-	ProtectContent       bool              `json:"protect_content,omitempty"`
-	ReplyParameters      *ReplyParameters  `json:"reply_parameters,omitempty"`
-	Files                map[string][]byte `json:"-"`
-	FileNames            map[string]string `json:"-"`
+	BusinessConnectionID  string            `json:"business_connection_id,omitempty"`
+	ChatID                int64             `json:"chat_id"`
+	MessageThreadID       int               `json:"message_thread_id,omitempty"`
+	DirectMessagesTopicID int               `json:"direct_messages_topic_id,omitempty"`
+	Media                 json.RawMessage   `json:"media"`
+	DisableNotification   bool              `json:"disable_notification,omitempty"`
+	ProtectContent        bool              `json:"protect_content,omitempty"`
+	AllowPaidBroadcast    bool              `json:"allow_paid_broadcast,omitempty"`
+	MessageEffectID       string            `json:"message_effect_id,omitempty"`
+	ReplyParameters       *ReplyParameters  `json:"reply_parameters,omitempty"`
+	ReplyMarkup           json.RawMessage   `json:"reply_markup,omitempty"`
+	Files                 map[string][]byte `json:"-"`
+	FileNames             map[string]string `json:"-"`
+}
+
+// StarAmount represents Telegram Star amount.
+type StarAmount struct {
+	Amount         int64 `json:"amount"`
+	NanostarAmount int   `json:"nanostar_amount,omitempty"`
+}
+
+// SetMyProfilePhotoRequest represents parameters for setMyProfilePhoto.
+type SetMyProfilePhotoRequest struct {
+	Photo     string `json:"photo,omitempty"`
+	PhotoData []byte `json:"-"`
+}
+
+// UserProfileAudios represents user's audio files.
+type UserProfileAudios struct {
+	TotalCount int       `json:"total_count"`
+	Audios     []Message `json:"audios"`
+}
+
+// SetChatMemberTagRequest represents parameters for setChatMemberTag.
+type SetChatMemberTagRequest struct {
+	ChatID int64  `json:"chat_id"`
+	UserID int64  `json:"user_id"`
+	Tag    string `json:"tag,omitempty"`
 }
 
 // SetBusinessAccountBioRequest represents parameters for setBusinessAccountBio.

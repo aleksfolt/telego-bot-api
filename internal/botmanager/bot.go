@@ -165,17 +165,21 @@ func (b *BotInstance) Start(ctx context.Context) error {
 					b.mu.Lock()
 					b.botID = user.ID
 					b.self = &converter.User{
-						ID:                      user.ID,
-						IsBot:                   true,
-						FirstName:               user.FirstName,
-						LastName:                user.LastName,
-						Username:                user.Username,
-						CanJoinGroups:           !user.GetBotNochats(),
-						CanReadAllGroupMessages: user.GetBotChatHistory(),
-						SupportsInlineQueries:   user.GetBotInlineGeo() || user.BotInlinePlaceholder != "",
-						CanConnectToBusiness:    converter.BoolPtr(canConnectBusiness),
-						HasMainWebApp:           user.GetBotAttachMenu(),
-						CanManageBots:           converter.BoolPtr(canManageBots),
+						ID:                         user.ID,
+						IsBot:                      true,
+						FirstName:                  user.FirstName,
+						LastName:                   user.LastName,
+						Username:                   user.Username,
+						CanJoinGroups:              !user.GetBotNochats(),
+						CanReadAllGroupMessages:    user.GetBotChatHistory(),
+						SupportsInlineQueries:      user.GetBotInlineGeo() || user.BotInlinePlaceholder != "",
+						SupportsGuestQueries:       user.GetBotGuestchat(),
+						CanConnectToBusiness:       converter.BoolPtr(canConnectBusiness),
+						HasMainWebApp:              user.GetBotHasMainApp() || user.GetBotAttachMenu(),
+						HasTopicsEnabled:           user.GetBotForumView(),
+						AllowsUsersToCreateTopics:  user.GetBotForumCanManageTopics(),
+						CanManageBots:              converter.BoolPtr(canManageBots),
+						SupportsJoinRequestQueries: user.GetBotGuard(),
 					}
 					b.lastSelfRefresh = time.Now()
 					b.converter.SetSelfUserID(user.ID)
@@ -734,17 +738,21 @@ func (b *BotInstance) RefreshMe(ctx context.Context) *converter.User {
 				b.lastSelfRefresh = time.Now()
 				b.botID = u.ID
 				b.self = &converter.User{
-					ID:                      u.ID,
-					IsBot:                   true,
-					FirstName:               u.FirstName,
-					LastName:                u.LastName,
-					Username:                u.Username,
-					CanJoinGroups:           !u.GetBotNochats(),
-					CanReadAllGroupMessages: u.GetBotChatHistory(),
-					SupportsInlineQueries:   u.GetBotInlineGeo() || u.BotInlinePlaceholder != "",
-					CanConnectToBusiness:    converter.BoolPtr(canConnectBusiness),
-					HasMainWebApp:           u.GetBotAttachMenu(),
-					CanManageBots:           converter.BoolPtr(canManageBots),
+					ID:                         u.ID,
+					IsBot:                      true,
+					FirstName:                  u.FirstName,
+					LastName:                   u.LastName,
+					Username:                   u.Username,
+					CanJoinGroups:              !u.GetBotNochats(),
+					CanReadAllGroupMessages:    u.GetBotChatHistory(),
+					SupportsInlineQueries:      u.GetBotInlineGeo() || u.BotInlinePlaceholder != "",
+					SupportsGuestQueries:       u.GetBotGuestchat(),
+					CanConnectToBusiness:       converter.BoolPtr(canConnectBusiness),
+					HasMainWebApp:              u.GetBotHasMainApp() || u.GetBotAttachMenu(),
+					HasTopicsEnabled:           u.GetBotForumView(),
+					AllowsUsersToCreateTopics:  u.GetBotForumCanManageTopics(),
+					CanManageBots:              converter.BoolPtr(canManageBots),
+					SupportsJoinRequestQueries: u.GetBotGuard(),
 				}
 				b.converter.SetSelfUserID(u.ID)
 				b.mu.Unlock()
@@ -1104,11 +1112,21 @@ func (b *BotInstance) SendChatAction(ctx context.Context, req *converter.SendCha
 		action = &tg.SendMessageTypingAction{}
 	}
 
-	_, err = b.raw.MessagesSetTyping(ctx, &tg.MessagesSetTypingRequest{
+	setTypingReq := &tg.MessagesSetTypingRequest{
 		Peer:     peer,
 		Action:   action,
 		TopMsgID: req.MessageThreadID,
-	})
+	}
+
+	if req.BusinessConnectionID != "" {
+		var res tg.BoolBox
+		err = b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
+			ConnectionID: req.BusinessConnectionID,
+			Query:        setTypingReq,
+		}, &res)
+	} else {
+		_, err = b.raw.MessagesSetTyping(ctx, setTypingReq)
+	}
 	if err != nil {
 		return false, fmt.Errorf("mtproto set typing: %w", err)
 	}

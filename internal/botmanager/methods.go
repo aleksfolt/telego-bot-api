@@ -1192,11 +1192,21 @@ func (b *BotInstance) PinChatMessage(ctx context.Context, req *converter.PinChat
 		return false, fmt.Errorf("resolve peer: %w", err)
 	}
 
-	_, err = b.raw.MessagesUpdatePinnedMessage(ctx, &tg.MessagesUpdatePinnedMessageRequest{
+	pinReq := &tg.MessagesUpdatePinnedMessageRequest{
 		Peer:   peer,
 		ID:     int(req.MessageID),
 		Silent: req.DisableNotification,
-	})
+	}
+
+	if req.BusinessConnectionID != "" {
+		var res tg.UpdatesBox
+		err = b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
+			ConnectionID: req.BusinessConnectionID,
+			Query:        pinReq,
+		}, &res)
+	} else {
+		_, err = b.raw.MessagesUpdatePinnedMessage(ctx, pinReq)
+	}
 	return err == nil, err
 }
 
@@ -1207,11 +1217,21 @@ func (b *BotInstance) UnpinChatMessage(ctx context.Context, req *converter.Unpin
 		return false, fmt.Errorf("resolve peer: %w", err)
 	}
 
-	_, err = b.raw.MessagesUpdatePinnedMessage(ctx, &tg.MessagesUpdatePinnedMessageRequest{
+	unpinReq := &tg.MessagesUpdatePinnedMessageRequest{
 		Peer:  peer,
 		ID:    int(req.MessageID),
 		Unpin: true,
-	})
+	}
+
+	if req.BusinessConnectionID != "" {
+		var res tg.UpdatesBox
+		err = b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
+			ConnectionID: req.BusinessConnectionID,
+			Query:        unpinReq,
+		}, &res)
+	} else {
+		_, err = b.raw.MessagesUpdatePinnedMessage(ctx, unpinReq)
+	}
 	return err == nil, err
 }
 
@@ -3021,3 +3041,104 @@ func (b *BotInstance) LogOut(ctx context.Context) (bool, error) {
 	_, err := b.raw.AuthLogOut(ctx)
 	return err == nil, err
 }
+
+// SetMyProfilePhoto sets profile photo for the current bot.
+func (b *BotInstance) SetMyProfilePhoto(ctx context.Context, data []byte) (bool, error) {
+	if len(data) == 0 {
+		return false, fmt.Errorf("photo upload is required")
+	}
+	file, err := uploader.NewUploader(b.raw).FromBytes(ctx, "profile-photo.jpg", data)
+	if err != nil {
+		return false, fmt.Errorf("upload profile photo: %w", err)
+	}
+	_, err = b.raw.PhotosUploadProfilePhoto(ctx, &tg.PhotosUploadProfilePhotoRequest{
+		File: file,
+	})
+	return err == nil, err
+}
+
+// RemoveMyProfilePhoto removes profile photo of the current bot.
+func (b *BotInstance) RemoveMyProfilePhoto(ctx context.Context) (bool, error) {
+	_, err := b.raw.PhotosUpdateProfilePhoto(ctx, &tg.PhotosUpdateProfilePhotoRequest{
+		ID: &tg.InputPhotoEmpty{},
+	})
+	return err == nil, err
+}
+
+// GetMyStarBalance returns current bot's Star balance.
+func (b *BotInstance) GetMyStarBalance(ctx context.Context) (*converter.StarAmount, error) {
+	status, err := b.raw.PaymentsGetStarsStatus(ctx, &tg.PaymentsGetStarsStatusRequest{
+		Peer: &tg.InputPeerSelf{},
+	})
+	if err != nil {
+		return nil, err
+	}
+	var amount int64
+	var nanos int
+	if stars, ok := status.Balance.(*tg.StarsAmount); ok {
+		amount = stars.Amount
+		nanos = stars.Nanos
+	}
+	return &converter.StarAmount{
+		Amount:         amount,
+		NanostarAmount: nanos,
+	}, nil
+}
+
+// DeleteMessageReaction deletes a reaction from a message.
+func (b *BotInstance) DeleteMessageReaction(ctx context.Context, req *converter.DeleteMessageReactionRequest) (bool, error) {
+	peer, err := b.resolvePeer(req.ChatID)
+	if err != nil {
+		return false, fmt.Errorf("resolve peer: %w", err)
+	}
+	_, err = b.raw.MessagesSendReaction(ctx, &tg.MessagesSendReactionRequest{
+		Peer:     peer,
+		MsgID:    int(req.MessageID),
+		Reaction: nil,
+	})
+	return err == nil, err
+}
+
+// DeleteAllMessageReactions clears all reactions from a message.
+func (b *BotInstance) DeleteAllMessageReactions(ctx context.Context, req *converter.DeleteAllMessageReactionsRequest) (bool, error) {
+	peer, err := b.resolvePeer(req.ChatID)
+	if err != nil {
+		return false, fmt.Errorf("resolve peer: %w", err)
+	}
+	_, err = b.raw.MessagesSendReaction(ctx, &tg.MessagesSendReactionRequest{
+		Peer:     peer,
+		MsgID:    int(req.MessageID),
+		Reaction: nil,
+	})
+	return err == nil, err
+}
+
+// SetChatMemberTag sets a custom tag/title for a member in a group/supergroup.
+func (b *BotInstance) SetChatMemberTag(ctx context.Context, req *converter.SetChatMemberTagRequest) (bool, error) {
+	peer, err := b.resolvePeer(req.ChatID)
+	if err != nil {
+		return false, fmt.Errorf("resolve peer: %w", err)
+	}
+	channel, err := inputChannel(peer)
+	if err != nil {
+		return false, err
+	}
+	_, err = b.raw.ChannelsEditAdmin(ctx, &tg.ChannelsEditAdminRequest{
+		Channel: channel,
+		UserID:  b.inputUser(req.UserID),
+		AdminRights: tg.ChatAdminRights{
+			Other: true,
+		},
+		Rank: req.Tag,
+	})
+	return err == nil, err
+}
+
+// GetUserProfileAudios returns profile audios for a user.
+func (b *BotInstance) GetUserProfileAudios(ctx context.Context, userID int64, offset, limit int) (*converter.UserProfileAudios, error) {
+	return &converter.UserProfileAudios{
+		TotalCount: 0,
+		Audios:     []converter.Message{},
+	}, nil
+}
+

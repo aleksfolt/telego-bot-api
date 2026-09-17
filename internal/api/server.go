@@ -345,6 +345,12 @@ func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 		s.handleSetMyShortDescription(ctx, bot)
 	case "getmyshortdescription":
 		s.handleGetMyShortDescription(ctx, bot)
+	case "setmyprofilephoto":
+		s.handleSetMyProfilePhoto(ctx, bot)
+	case "removemyprofilephoto":
+		s.handleRemoveMyProfilePhoto(ctx, bot)
+	case "getuserprofileaudios":
+		s.handleGetUserProfileAudios(ctx, bot)
 
 	// Forum Topics
 	case "createforumtopic":
@@ -397,6 +403,8 @@ func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 		s.handleRefundStarPayment(ctx, bot)
 	case "getstartransactions":
 		s.handleGetStarTransactions(ctx, bot)
+	case "getmystarbalance":
+		s.handleGetMyStarBalance(ctx, bot)
 	case "getavailablegifts":
 		s.handleGetAvailableGifts(ctx, bot)
 	case "sendgift":
@@ -435,7 +443,7 @@ func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 		s.handleSetStickerMaskPosition(ctx, bot)
 	case "setstickersettitle":
 		s.handleSetStickerSetTitle(ctx, bot)
-	case "setstickersetthumbnail":
+	case "setstickersetthumbnail", "setstickersetthumb":
 		s.handleSetStickerSetThumbnail(ctx, bot)
 	case "setcustomemojistickersetthumbnail":
 		s.handleSetCustomEmojiStickerSetThumbnail(ctx, bot)
@@ -475,6 +483,14 @@ func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 		s.handleDeleteStory(ctx, bot)
 	case "readbusinessconnection":
 		s.handleReadBusinessConnection(ctx, bot)
+
+	// Reactions & Chat Member
+	case "deletemessagereaction":
+		s.handleDeleteMessageReaction(ctx, bot)
+	case "deleteallmessagereactions":
+		s.handleDeleteAllMessageReactions(ctx, bot)
+	case "setchatmembertag":
+		s.handleSetChatMemberTag(ctx, bot)
 
 	default:
 		s.respondError(ctx, 404, "Not Found: method not supported yet in telego-bot-api: "+method)

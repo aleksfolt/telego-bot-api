@@ -1876,3 +1876,133 @@ func (s *Server) handleRemoveBusinessAccountProfilePhoto(ctx *fasthttp.RequestCt
 	}
 	s.respondOK(ctx, result)
 }
+
+func (s *Server) handleSetMyProfilePhoto(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.SetMyProfilePhotoRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	if data, _ := ExtractFileFromRequest(ctx, "photo", req.Photo); len(data) > 0 {
+		req.PhotoData = data
+	}
+	if len(req.PhotoData) == 0 {
+		s.respondError(ctx, 400, "Bad Request: photo upload is required")
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	ok, err := bot.SetMyProfilePhoto(c, req.PhotoData)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleRemoveMyProfilePhoto(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.RemoveMyProfilePhoto(c)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleGetMyStarBalance(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	balance, err := bot.GetMyStarBalance(c)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, balance)
+}
+
+func (s *Server) handleDeleteMessageReaction(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.DeleteMessageReactionRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	if req.ChatID == 0 || req.MessageID == 0 {
+		s.respondError(ctx, 400, "Bad Request: chat_id and message_id are required")
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.DeleteMessageReaction(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleDeleteAllMessageReactions(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.DeleteAllMessageReactionsRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	if req.ChatID == 0 {
+		s.respondError(ctx, 400, "Bad Request: chat_id is required")
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.DeleteAllMessageReactions(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleSetChatMemberTag(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.SetChatMemberTagRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	if req.ChatID == 0 || req.UserID == 0 {
+		s.respondError(ctx, 400, "Bad Request: chat_id and user_id are required")
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.SetChatMemberTag(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleGetUserProfileAudios(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req struct {
+		UserID int64 `json:"user_id"`
+		Offset int   `json:"offset,omitempty"`
+		Limit  int   `json:"limit,omitempty"`
+	}
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	if req.UserID == 0 {
+		s.respondError(ctx, 400, "Bad Request: user_id is required")
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := bot.GetUserProfileAudios(c, req.UserID, req.Offset, req.Limit)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, res)
+}
+
