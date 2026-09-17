@@ -492,3 +492,18 @@ func (r *RedisStore) GetBotProfile(ctx context.Context, token string) ([]byte, e
 	}
 	return val, err
 }
+
+// SaveBusinessConnection caches a serialized BusinessConnection in Redis.
+func (r *RedisStore) SaveBusinessConnection(ctx context.Context, connectionID string, data []byte) error {
+	return r.client.Set(ctx, fmt.Sprintf("telego:busconn:%s", connectionID), data, 30*24*time.Hour).Err()
+}
+
+// GetBusinessConnection retrieves a serialized BusinessConnection from Redis.
+func (r *RedisStore) GetBusinessConnection(ctx context.Context, connectionID string) ([]byte, error) {
+	val, err := r.client.Get(ctx, fmt.Sprintf("telego:busconn:%s", connectionID)).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return nil, nil
+	}
+	return val, err
+}
+

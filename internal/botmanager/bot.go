@@ -342,6 +342,11 @@ func (b *BotInstance) Handle(ctx context.Context, u tg.UpdatesClass) error {
 				b.busConnsMu.Lock()
 				b.busConns[converted.BusinessConnection.ID] = converted.BusinessConnection
 				b.busConnsMu.Unlock()
+				if b.redisStore != nil {
+					if data, err := json.Marshal(converted.BusinessConnection); err == nil {
+						_ = b.redisStore.SaveBusinessConnection(context.Background(), converted.BusinessConnection.ID, data)
+					}
+				}
 			}
 			extraUpdates = append(extraUpdates, converted)
 		}
@@ -817,6 +822,28 @@ func (b *BotInstance) GetOrRefreshMe(ctx context.Context) *converter.User {
 
 // GetBusinessConnection retrieves a business connection by its ID.
 func (b *BotInstance) GetBusinessConnection(ctx context.Context, connectionID string) (*converter.BusinessConnection, error) {
+	// 1. Check in-memory cache
+	b.busConnsMu.RLock()
+	cached, ok := b.busConns[connectionID]
+	b.busConnsMu.RUnlock()
+	if ok && cached != nil {
+		return cached, nil
+	}
+
+	// 2. Check Redis cache
+	if b.redisStore != nil {
+		if data, err := b.redisStore.GetBusinessConnection(ctx, connectionID); err == nil && len(data) > 0 {
+			var conn converter.BusinessConnection
+			if err := json.Unmarshal(data, &conn); err == nil {
+				b.busConnsMu.Lock()
+				b.busConns[connectionID] = &conn
+				b.busConnsMu.Unlock()
+				return &conn, nil
+			}
+		}
+	}
+
+	// 3. Query MTProto
 	if b.raw != nil {
 		updates, err := b.raw.AccountGetBotBusinessConnection(ctx, connectionID)
 		if err == nil {
@@ -872,17 +899,15 @@ func (b *BotInstance) GetBusinessConnection(ctx context.Context, connectionID st
 				b.busConns[connectionID] = res
 				b.busConnsMu.Unlock()
 
+				if b.redisStore != nil {
+					if data, err := json.Marshal(res); err == nil {
+						_ = b.redisStore.SaveBusinessConnection(context.Background(), connectionID, data)
+					}
+				}
+
 				return res, nil
 			}
 		}
-	}
-
-	// Fallback to in-memory cached connection if MTProto query fails or not found
-	b.busConnsMu.RLock()
-	cached, ok := b.busConns[connectionID]
-	b.busConnsMu.RUnlock()
-	if ok && cached != nil {
-		return cached, nil
 	}
 
 	return nil, fmt.Errorf("business connection not found")
