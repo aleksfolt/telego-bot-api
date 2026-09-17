@@ -246,6 +246,11 @@ func (b *BotInstance) Start(ctx context.Context) error {
 				zap.Duration("retry_after", backoff),
 			)
 
+			if runErr != nil && strings.Contains(runErr.Error(), "AUTH_KEY_UNREGISTERED") {
+				b.logger.Warn("Auth key unregistered for bot, purging session from Redis to force fresh auth", zap.String("token_prefix", b.token[:min(10, len(b.token))]))
+				_ = b.redisStore.DeleteSession(context.Background(), b.token)
+			}
+
 			select {
 			case <-ctx.Done():
 				return
