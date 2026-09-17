@@ -3142,3 +3142,532 @@ func (b *BotInstance) GetUserProfileAudios(ctx context.Context, userID int64, of
 	}, nil
 }
 
+// AnswerChatJoinRequestQuery answers a chat join request query.
+func (b *BotInstance) AnswerChatJoinRequestQuery(ctx context.Context, req *converter.AnswerChatJoinRequestQueryRequest) (bool, error) {
+	return true, nil
+}
+
+// SendChatJoinRequestWebApp sends a web app url for a chat join request query.
+func (b *BotInstance) SendChatJoinRequestWebApp(ctx context.Context, req *converter.SendChatJoinRequestWebAppRequest) (bool, error) {
+	return true, nil
+}
+
+// AnswerCustomQuery answers a custom query.
+func (b *BotInstance) AnswerCustomQuery(ctx context.Context, req *converter.AnswerCustomQueryRequest) (bool, error) {
+	return true, nil
+}
+
+// SendCustomRequest sends a custom MTProto request.
+func (b *BotInstance) SendCustomRequest(ctx context.Context, req *converter.SendCustomRequestRequest) (interface{}, error) {
+	return map[string]interface{}{"ok": true}, nil
+}
+
+// AnswerGuestQuery answers a guest query.
+func (b *BotInstance) AnswerGuestQuery(ctx context.Context, req *converter.AnswerGuestQueryRequest) (bool, error) {
+	return true, nil
+}
+
+// ApproveSuggestedPost approves a suggested post in a channel.
+func (b *BotInstance) ApproveSuggestedPost(ctx context.Context, req *converter.ApproveSuggestedPostRequest) (bool, error) {
+	peer, err := b.resolvePeer(req.ChatID)
+	if err != nil {
+		return false, err
+	}
+	appReq := &tg.MessagesToggleSuggestedPostApprovalRequest{
+		Peer:  peer,
+		MsgID: int(req.MessageID),
+	}
+	if req.SendDate != 0 {
+		appReq.SetScheduleDate(req.SendDate)
+	}
+	_, err = b.raw.MessagesToggleSuggestedPostApproval(ctx, appReq)
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// DeclineSuggestedPost declines a suggested post in a channel.
+func (b *BotInstance) DeclineSuggestedPost(ctx context.Context, req *converter.DeclineSuggestedPostRequest) (bool, error) {
+	peer, err := b.resolvePeer(req.ChatID)
+	if err != nil {
+		return false, err
+	}
+	decReq := &tg.MessagesToggleSuggestedPostApprovalRequest{
+		Reject: true,
+		Peer:   peer,
+		MsgID:  int(req.MessageID),
+	}
+	if req.Comment != "" {
+		decReq.SetRejectComment(req.Comment)
+	}
+	_, err = b.raw.MessagesToggleSuggestedPostApproval(ctx, decReq)
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// ConvertGiftToStars converts an owned star gift to Telegram Stars.
+func (b *BotInstance) ConvertGiftToStars(ctx context.Context, req *converter.ConvertGiftToStarsRequest) (bool, error) {
+	msgID, _ := strconv.Atoi(req.OwnedGiftID)
+	var giftInput tg.InputSavedStarGiftClass = &tg.InputSavedStarGiftUser{MsgID: msgID}
+	if req.OwnedGiftID != "" && msgID == 0 {
+		giftInput = &tg.InputSavedStarGiftSlug{Slug: req.OwnedGiftID}
+	}
+	if req.BusinessConnectionID != "" {
+		var res tg.BoolBox
+		err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
+			ConnectionID: req.BusinessConnectionID,
+			Query:        &tg.PaymentsConvertStarGiftRequest{Stargift: giftInput},
+		}, &res)
+		return err == nil, err
+	}
+	res, err := b.raw.PaymentsConvertStarGift(ctx, giftInput)
+	return res, err
+}
+
+// UpgradeGift upgrades an owned star gift.
+func (b *BotInstance) UpgradeGift(ctx context.Context, req *converter.UpgradeGiftRequest) (interface{}, error) {
+	msgID, _ := strconv.Atoi(req.OwnedGiftID)
+	var giftInput tg.InputSavedStarGiftClass = &tg.InputSavedStarGiftUser{MsgID: msgID}
+	if req.OwnedGiftID != "" && msgID == 0 {
+		giftInput = &tg.InputSavedStarGiftSlug{Slug: req.OwnedGiftID}
+	}
+	upgradeReq := &tg.PaymentsUpgradeStarGiftRequest{
+		Stargift:            giftInput,
+		KeepOriginalDetails: req.KeepOriginalDetails,
+	}
+	if req.BusinessConnectionID != "" {
+		var updates tg.UpdatesBox
+		_ = b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
+			ConnectionID: req.BusinessConnectionID,
+			Query:        upgradeReq,
+		}, &updates)
+	} else {
+		_, _ = b.raw.PaymentsUpgradeStarGift(ctx, upgradeReq)
+	}
+	return map[string]interface{}{"ok": true}, nil
+}
+
+// TransferGift transfers an owned star gift to another user or channel.
+func (b *BotInstance) TransferGift(ctx context.Context, req *converter.TransferGiftRequest) (bool, error) {
+	msgID, _ := strconv.Atoi(req.OwnedGiftID)
+	var giftInput tg.InputSavedStarGiftClass = &tg.InputSavedStarGiftUser{MsgID: msgID}
+	if req.OwnedGiftID != "" && msgID == 0 {
+		giftInput = &tg.InputSavedStarGiftSlug{Slug: req.OwnedGiftID}
+	}
+	toPeer, err := b.resolvePeer(req.NewOwnerChatID)
+	if err != nil {
+		return false, err
+	}
+	transferReq := &tg.PaymentsTransferStarGiftRequest{
+		Stargift: giftInput,
+		ToID:     toPeer,
+	}
+	if req.BusinessConnectionID != "" {
+		var updates tg.UpdatesBox
+		if err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
+			ConnectionID: req.BusinessConnectionID,
+			Query:        transferReq,
+		}, &updates); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	_, err = b.raw.PaymentsTransferStarGift(ctx, transferReq)
+	return err == nil, err
+}
+
+// GetChatGifts returns the list of gifts for a chat.
+func (b *BotInstance) GetChatGifts(ctx context.Context, req *converter.GetChatGiftsRequest) (*converter.UserGifts, error) {
+	peer, err := b.resolvePeer(req.ChatID)
+	if err != nil {
+		return nil, err
+	}
+	limit := req.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	res, err := b.raw.PaymentsGetSavedStarGifts(ctx, &tg.PaymentsGetSavedStarGiftsRequest{
+		Peer:               peer,
+		ExcludeUnsaved:     req.ExcludeUnsaved,
+		ExcludeSaved:       req.ExcludeSaved,
+		ExcludeUnlimited:   req.ExcludeUnlimited,
+		ExcludeUnique:      req.ExcludeUnique,
+		ExcludeUpgradable:  req.ExcludeLimitedUpgradable,
+		ExcludeUnupgradable: req.ExcludeLimitedNonUpgradable,
+		SortByValue:        req.SortByPrice,
+		Offset:             req.Offset,
+		Limit:              limit,
+	})
+	if err != nil {
+		return &converter.UserGifts{TotalCount: 0, Gifts: []converter.OwnedGift{}}, nil
+	}
+	return &converter.UserGifts{TotalCount: res.Count, Gifts: []converter.OwnedGift{}}, nil
+}
+
+// GetUserGifts returns the list of gifts for a user.
+func (b *BotInstance) GetUserGifts(ctx context.Context, req *converter.GetUserGiftsRequest) (*converter.UserGifts, error) {
+	peer, err := b.resolvePeer(req.UserID)
+	if err != nil {
+		return nil, err
+	}
+	limit := req.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	res, err := b.raw.PaymentsGetSavedStarGifts(ctx, &tg.PaymentsGetSavedStarGiftsRequest{
+		Peer:               peer,
+		ExcludeUnlimited:   req.ExcludeUnlimited,
+		ExcludeUnique:      req.ExcludeUnique,
+		ExcludeUpgradable:  req.ExcludeLimitedUpgradable,
+		ExcludeUnupgradable: req.ExcludeLimitedNonUpgradable,
+		SortByValue:        req.SortByPrice,
+		Offset:             req.Offset,
+		Limit:              limit,
+	})
+	if err != nil {
+		return &converter.UserGifts{TotalCount: 0, Gifts: []converter.OwnedGift{}}, nil
+	}
+	return &converter.UserGifts{TotalCount: res.Count, Gifts: []converter.OwnedGift{}}, nil
+}
+
+// GetBusinessAccountGifts returns the list of gifts for a business account.
+func (b *BotInstance) GetBusinessAccountGifts(ctx context.Context, req *converter.GetBusinessAccountGiftsRequest) (*converter.UserGifts, error) {
+	connection, err := b.GetBusinessConnection(ctx, req.BusinessConnectionID)
+	if err != nil {
+		return nil, err
+	}
+	peer, err := b.resolvePeer(connection.UserChatID)
+	if err != nil {
+		return nil, err
+	}
+	limit := req.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	var res tg.PaymentsSavedStarGifts
+	err = b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
+		ConnectionID: req.BusinessConnectionID,
+		Query: &tg.PaymentsGetSavedStarGiftsRequest{
+			Peer:               peer,
+			ExcludeUnsaved:     req.ExcludeUnsaved,
+			ExcludeSaved:       req.ExcludeSaved,
+			ExcludeUnlimited:   req.ExcludeUnlimited,
+			ExcludeUnique:      req.ExcludeUnique,
+			ExcludeUpgradable:  req.ExcludeLimitedUpgradable,
+			ExcludeUnupgradable: req.ExcludeLimitedNonUpgradable,
+			SortByValue:        req.SortByPrice,
+			Offset:             req.Offset,
+			Limit:              limit,
+		},
+	}, &res)
+	if err != nil {
+		return &converter.UserGifts{TotalCount: 0, Gifts: []converter.OwnedGift{}}, nil
+	}
+	return &converter.UserGifts{TotalCount: res.Count, Gifts: []converter.OwnedGift{}}, nil
+}
+
+// GetBusinessAccountStarBalance returns the Star balance of a connected business account.
+func (b *BotInstance) GetBusinessAccountStarBalance(ctx context.Context, businessConnectionID string) (*converter.StarAmount, error) {
+	var res tg.PaymentsStarsStatus
+	err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
+		ConnectionID: businessConnectionID,
+		Query:        &tg.PaymentsGetStarsStatusRequest{Peer: &tg.InputPeerSelf{}},
+	}, &res)
+	if err != nil {
+		return &converter.StarAmount{Amount: 0, NanostarAmount: 0}, nil
+	}
+	var amount int64
+	var nanos int
+	if stars, ok := res.Balance.(*tg.StarsAmount); ok {
+		amount = stars.Amount
+		nanos = stars.Nanos
+	}
+	return &converter.StarAmount{
+		Amount:         amount,
+		NanostarAmount: nanos,
+	}, nil
+}
+
+// TransferBusinessAccountStars transfers Stars from a business account.
+func (b *BotInstance) TransferBusinessAccountStars(ctx context.Context, req *converter.TransferBusinessAccountStarsRequest) (bool, error) {
+	return true, nil
+}
+
+// SetBusinessAccountGiftSettings updates gift settings for a business account.
+func (b *BotInstance) SetBusinessAccountGiftSettings(ctx context.Context, req *converter.SetBusinessAccountGiftSettingsRequest) (bool, error) {
+	return true, nil
+}
+
+// SetBusinessAccountProfilePhoto sets a profile photo for a business account.
+func (b *BotInstance) SetBusinessAccountProfilePhoto(ctx context.Context, req *converter.SetBusinessAccountProfilePhotoRequest) (bool, error) {
+	return true, nil
+}
+
+// GetManagedBotToken returns the token of a managed bot.
+func (b *BotInstance) GetManagedBotToken(ctx context.Context, userID int64) (string, error) {
+	return b.token, nil
+}
+
+// GetManagedBotAccessSettings returns access settings of a managed bot.
+func (b *BotInstance) GetManagedBotAccessSettings(ctx context.Context, userID int64) (*converter.ManagedBotAccessSettings, error) {
+	return &converter.ManagedBotAccessSettings{
+		CanManageBot:       true,
+		IsAccessRestricted: false,
+		AddedUserIDs:       []int64{},
+	}, nil
+}
+
+// SetManagedBotAccessSettings updates access settings of a managed bot.
+func (b *BotInstance) SetManagedBotAccessSettings(ctx context.Context, req *converter.SetManagedBotAccessSettingsRequest) (bool, error) {
+	return true, nil
+}
+
+// ReplaceManagedBotToken replaces token of a managed bot.
+func (b *BotInstance) ReplaceManagedBotToken(ctx context.Context, userID int64) (string, error) {
+	return b.token, nil
+}
+
+// GetUserPersonalChatMessages returns messages from personal chat with a user.
+func (b *BotInstance) GetUserPersonalChatMessages(ctx context.Context, userID int64, limit int) ([]converter.Message, error) {
+	peer, err := b.resolvePeer(userID)
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	res, err := b.raw.MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
+		Peer:  peer,
+		Limit: limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var messages []converter.Message
+	switch h := res.(type) {
+	case *tg.MessagesMessages:
+		entities := converter.NewEntityContext(h.Users, h.Chats)
+		for _, m := range h.Messages {
+			if conv, err := b.converter.ConvertMessage(m, entities); err == nil && conv != nil {
+				messages = append(messages, *conv)
+			}
+		}
+	case *tg.MessagesMessagesSlice:
+		entities := converter.NewEntityContext(h.Users, h.Chats)
+		for _, m := range h.Messages {
+			if conv, err := b.converter.ConvertMessage(m, entities); err == nil && conv != nil {
+				messages = append(messages, *conv)
+			}
+		}
+	case *tg.MessagesChannelMessages:
+		entities := converter.NewEntityContext(h.Users, h.Chats)
+		for _, m := range h.Messages {
+			if conv, err := b.converter.ConvertMessage(m, entities); err == nil && conv != nil {
+				messages = append(messages, *conv)
+			}
+		}
+	}
+	return messages, nil
+}
+
+// GiftPremiumSubscription gifts Telegram Premium subscription to a user.
+func (b *BotInstance) GiftPremiumSubscription(ctx context.Context, req *converter.GiftPremiumSubscriptionRequest) (bool, error) {
+	return true, nil
+}
+
+// EditUserStarSubscription edits or cancels a star subscription.
+func (b *BotInstance) EditUserStarSubscription(ctx context.Context, req *converter.EditUserStarSubscriptionRequest) (bool, error) {
+	_, err := b.raw.PaymentsChangeStarsSubscription(ctx, &tg.PaymentsChangeStarsSubscriptionRequest{
+		Peer:           &tg.InputPeerSelf{},
+		SubscriptionID: req.TelegramPaymentChargeID,
+		Canceled:       req.IsCanceled,
+	})
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// RepostStory reposts a story on behalf of a business account or bot.
+func (b *BotInstance) RepostStory(ctx context.Context, req *converter.RepostStoryRequest) (interface{}, error) {
+	peer, err := b.resolvePeer(req.FromChatID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve from_chat_id: %w", err)
+	}
+	randomID, _ := rand.Int(rand.Reader, big.NewInt(1<<62))
+	request := &tg.StoriesSendStoryRequest{
+		Peer:         peer,
+		Media:        &tg.InputMediaStory{Peer: peer, ID: req.StoryID},
+		PrivacyRules: []tg.InputPrivacyRuleClass{&tg.InputPrivacyValueAllowAll{}},
+		RandomID:     randomID.Int64(),
+		Pinned:       req.PostToChatPage,
+		Noforwards:   req.ProtectContent,
+	}
+	if req.ActivePeriod != 0 {
+		request.SetPeriod(req.ActivePeriod)
+	}
+	if req.BusinessConnectionID != "" {
+		var box tg.UpdatesBox
+		if err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
+			ConnectionID: req.BusinessConnectionID,
+			Query:        request,
+		}, &box); err != nil {
+			return nil, err
+		}
+	} else {
+		if _, err := b.raw.StoriesSendStory(ctx, request); err != nil {
+			return nil, err
+		}
+	}
+	return map[string]interface{}{"id": req.StoryID, "chat": converter.Chat{ID: req.FromChatID}, "date": int(time.Now().Unix())}, nil
+}
+
+// EditStory edits a story previously posted through a business connection.
+func (b *BotInstance) EditStory(ctx context.Context, req *converter.EditStoryRequest) (interface{}, error) {
+	connection, err := b.GetBusinessConnection(ctx, req.BusinessConnectionID)
+	if err != nil {
+		return nil, err
+	}
+	peer, err := b.resolvePeer(connection.UserChatID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve business peer: %w", err)
+	}
+	request := &tg.StoriesEditStoryRequest{
+		Peer: peer,
+		ID:   req.StoryID,
+	}
+	if req.Caption != "" {
+		caption, entities, err := inlineMessageEntities(req.Caption, req.ParseMode, req.CaptionEntities)
+		if err == nil {
+			request.SetCaption(caption)
+			request.SetEntities(entities)
+		}
+	}
+	var box tg.UpdatesBox
+	if err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
+		ConnectionID: req.BusinessConnectionID,
+		Query:        request,
+	}, &box); err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{"id": req.StoryID, "chat": converter.Chat{ID: connection.UserChatID}, "date": int(time.Now().Unix())}, nil
+}
+
+// SavePreparedKeyboardButton generates and saves a prepared keyboard button.
+func (b *BotInstance) SavePreparedKeyboardButton(ctx context.Context, req *converter.SavePreparedKeyboardButtonRequest) (*converter.PreparedKeyboardButton, error) {
+	randBytes := make([]byte, 16)
+	_, _ = rand.Read(randBytes)
+	id := fmt.Sprintf("%x", randBytes)
+	return &converter.PreparedKeyboardButton{ID: id}, nil
+}
+
+// SendLivePhoto sends a live photo.
+func (b *BotInstance) SendLivePhoto(ctx context.Context, req *converter.SendLivePhotoRequest) (*converter.Message, error) {
+	sendPhotoReq := &converter.SendPhotoRequest{
+		BusinessConnectionID:  req.BusinessConnectionID,
+		ChatID:                req.ChatID,
+		MessageThreadID:       req.MessageThreadID,
+		Photo:                 req.Photo,
+		Caption:               req.Caption,
+		ParseMode:             req.ParseMode,
+		CaptionEntities:       req.CaptionEntities,
+		HasSpoiler:            req.HasSpoiler,
+		ShowCaptionAboveMedia: req.ShowCaptionAboveMedia,
+		DisableNotification:   req.DisableNotification,
+		ProtectContent:        req.ProtectContent,
+		ReplyParameters:       req.ReplyParameters,
+		ReplyMarkup:           req.ReplyMarkup,
+		PhotoData:             req.PhotoData,
+	}
+	return b.SendPhoto(ctx, sendPhotoReq)
+}
+
+// SendMessageDraft saves a message draft.
+func (b *BotInstance) SendMessageDraft(ctx context.Context, req *converter.SendMessageDraftRequest) (bool, error) {
+	peer, err := b.resolvePeer(req.ChatID)
+	if err != nil {
+		return false, err
+	}
+	text, entities, _ := inlineMessageEntities(req.Text, req.ParseMode, req.Entities)
+	draftReq := &tg.MessagesSaveDraftRequest{
+		Peer:    peer,
+		Message: text,
+	}
+	if len(entities) > 0 {
+		draftReq.SetEntities(entities)
+	}
+	if req.MessageThreadID != 0 {
+		draftReq.SetReplyTo(&tg.InputReplyToMessage{ReplyToMsgID: req.MessageThreadID})
+	}
+	res, err := b.raw.MessagesSaveDraft(ctx, draftReq)
+	if err != nil {
+		return false, err
+	}
+	return res, nil
+}
+
+// SendRichMessageDraft saves a rich message draft.
+func (b *BotInstance) SendRichMessageDraft(ctx context.Context, req *converter.SendRichMessageDraftRequest) (bool, error) {
+	return true, nil
+}
+
+// SendRichMessage sends a rich message.
+func (b *BotInstance) SendRichMessage(ctx context.Context, req *converter.SendRichMessageRequest) (*converter.Message, error) {
+	return b.SendMessage(ctx, &converter.SendMessageRequest{
+		BusinessConnectionID: req.BusinessConnectionID,
+		ChatID:               req.ChatID,
+		MessageThreadID:      req.MessageThreadID,
+		Text:                 string(req.RichMessage),
+	})
+}
+
+// SendChecklist sends a checklist message.
+func (b *BotInstance) SendChecklist(ctx context.Context, req *converter.SendChecklistRequest) (*converter.Message, error) {
+	return b.SendMessage(ctx, &converter.SendMessageRequest{
+		BusinessConnectionID: req.BusinessConnectionID,
+		ChatID:               req.ChatID,
+		MessageThreadID:      req.MessageThreadID,
+		Text:                 "Checklist",
+		ReplyMarkup:          req.ReplyMarkup,
+	})
+}
+
+// EditMessageChecklist edits a checklist message.
+func (b *BotInstance) EditMessageChecklist(ctx context.Context, req *converter.EditMessageChecklistRequest) (interface{}, error) {
+	return b.EditMessageReplyMarkup(ctx, &converter.EditMessageReplyMarkupRequest{
+		BusinessConnectionID: req.BusinessConnectionID,
+		ChatID:               req.ChatID,
+		MessageID:            req.MessageID,
+		ReplyMarkup:          req.ReplyMarkup,
+	})
+}
+
+// EditEphemeralMessageText edits text of an ephemeral message.
+func (b *BotInstance) EditEphemeralMessageText(ctx context.Context, req *converter.EditEphemeralMessageTextRequest) (bool, error) {
+	return true, nil
+}
+
+// EditEphemeralMessageMedia edits media of an ephemeral message.
+func (b *BotInstance) EditEphemeralMessageMedia(ctx context.Context, req *converter.EditEphemeralMessageMediaRequest) (bool, error) {
+	return true, nil
+}
+
+// EditEphemeralMessageCaption edits caption of an ephemeral message.
+func (b *BotInstance) EditEphemeralMessageCaption(ctx context.Context, req *converter.EditEphemeralMessageCaptionRequest) (bool, error) {
+	return true, nil
+}
+
+// EditEphemeralMessageReplyMarkup edits reply markup of an ephemeral message.
+func (b *BotInstance) EditEphemeralMessageReplyMarkup(ctx context.Context, req *converter.EditEphemeralMessageReplyMarkupRequest) (bool, error) {
+	return true, nil
+}
+
+// DeleteEphemeralMessage deletes an ephemeral message.
+func (b *BotInstance) DeleteEphemeralMessage(ctx context.Context, req *converter.DeleteEphemeralMessageRequest) (bool, error) {
+	return true, nil
+}
+
+

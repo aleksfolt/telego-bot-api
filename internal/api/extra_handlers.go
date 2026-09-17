@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"telego-bot-api/internal/botmanager"
@@ -2005,4 +2006,639 @@ func (s *Server) handleGetUserProfileAudios(ctx *fasthttp.RequestCtx, bot *botma
 	}
 	s.respondOK(ctx, res)
 }
+
+func (s *Server) handleAnswerChatJoinRequestQuery(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.AnswerChatJoinRequestQueryRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.AnswerChatJoinRequestQuery(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleSendChatJoinRequestWebApp(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.SendChatJoinRequestWebAppRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.SendChatJoinRequestWebApp(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleAnswerCustomQuery(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.AnswerCustomQueryRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.AnswerCustomQuery(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleSendCustomRequest(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.SendCustomRequestRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := bot.SendCustomRequest(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, res)
+}
+
+func (s *Server) handleAnswerGuestQuery(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.AnswerGuestQueryRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.AnswerGuestQuery(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleApproveSuggestedPost(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.ApproveSuggestedPostRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.ApproveSuggestedPost(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleDeclineSuggestedPost(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.DeclineSuggestedPostRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.DeclineSuggestedPost(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleConvertGiftToStars(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.ConvertGiftToStarsRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.ConvertGiftToStars(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleUpgradeGift(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.UpgradeGiftRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := bot.UpgradeGift(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, res)
+}
+
+func (s *Server) handleTransferGift(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.TransferGiftRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.TransferGift(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleGetChatGifts(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.GetChatGiftsRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := bot.GetChatGifts(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, res)
+}
+
+func (s *Server) handleGetUserGifts(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.GetUserGiftsRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := bot.GetUserGifts(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, res)
+}
+
+func (s *Server) handleGetBusinessAccountGifts(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.GetBusinessAccountGiftsRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := bot.GetBusinessAccountGifts(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, res)
+}
+
+func (s *Server) handleGetBusinessAccountStarBalance(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.GetBusinessAccountStarBalanceRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := bot.GetBusinessAccountStarBalance(c, req.BusinessConnectionID)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, res)
+}
+
+func (s *Server) handleTransferBusinessAccountStars(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.TransferBusinessAccountStarsRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.TransferBusinessAccountStars(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleSetBusinessAccountGiftSettings(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.SetBusinessAccountGiftSettingsRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.SetBusinessAccountGiftSettings(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleSetBusinessAccountProfilePhoto(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.SetBusinessAccountProfilePhotoRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	if mf, err := ctx.MultipartForm(); err == nil && mf != nil {
+		if headers := mf.File["photo"]; len(headers) > 0 {
+			if f, err := headers[0].Open(); err == nil {
+				data, _ := io.ReadAll(f)
+				_ = f.Close()
+				req.PhotoData = data
+			}
+		}
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.SetBusinessAccountProfilePhoto(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleGetManagedBotToken(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.GetManagedBotTokenRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := bot.GetManagedBotToken(c, req.UserID)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, res)
+}
+
+func (s *Server) handleGetManagedBotAccessSettings(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.GetManagedBotAccessSettingsRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := bot.GetManagedBotAccessSettings(c, req.UserID)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, res)
+}
+
+func (s *Server) handleSetManagedBotAccessSettings(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.SetManagedBotAccessSettingsRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.SetManagedBotAccessSettings(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleReplaceManagedBotToken(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.ReplaceManagedBotTokenRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := bot.ReplaceManagedBotToken(c, req.UserID)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, res)
+}
+
+func (s *Server) handleGetUserPersonalChatMessages(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.GetUserPersonalChatMessagesRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := bot.GetUserPersonalChatMessages(c, req.UserID, req.Limit)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, res)
+}
+
+func (s *Server) handleGiftPremiumSubscription(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.GiftPremiumSubscriptionRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.GiftPremiumSubscription(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleEditUserStarSubscription(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.EditUserStarSubscriptionRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.EditUserStarSubscription(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleRepostStory(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.RepostStoryRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := bot.RepostStory(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, res)
+}
+
+func (s *Server) handleEditStory(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.EditStoryRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	req.Files, req.FileNames = ExtractAllFilesFromRequest(ctx)
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := bot.EditStory(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, res)
+}
+
+func (s *Server) handleSavePreparedKeyboardButton(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.SavePreparedKeyboardButtonRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := bot.SavePreparedKeyboardButton(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, res)
+}
+
+func (s *Server) handleSendLivePhoto(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.SendLivePhotoRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	if mf, err := ctx.MultipartForm(); err == nil && mf != nil {
+		if headers := mf.File["photo"]; len(headers) > 0 {
+			if f, err := headers[0].Open(); err == nil {
+				data, _ := io.ReadAll(f)
+				_ = f.Close()
+				req.PhotoData = data
+			}
+		}
+		if headers := mf.File["live_photo"]; len(headers) > 0 {
+			if f, err := headers[0].Open(); err == nil {
+				data, _ := io.ReadAll(f)
+				_ = f.Close()
+				req.LivePhotoData = data
+			}
+		}
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := bot.SendLivePhoto(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, res)
+}
+
+func (s *Server) handleSendMessageDraft(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.SendMessageDraftRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.SendMessageDraft(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleSendRichMessageDraft(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.SendRichMessageDraftRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.SendRichMessageDraft(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleSendRichMessage(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.SendRichMessageRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := bot.SendRichMessage(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, res)
+}
+
+func (s *Server) handleSendChecklist(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.SendChecklistRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := bot.SendChecklist(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, res)
+}
+
+func (s *Server) handleEditMessageChecklist(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.EditMessageChecklistRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := bot.EditMessageChecklist(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, res)
+}
+
+func (s *Server) handleEditEphemeralMessageText(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.EditEphemeralMessageTextRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.EditEphemeralMessageText(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleEditEphemeralMessageMedia(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.EditEphemeralMessageMediaRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.EditEphemeralMessageMedia(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleEditEphemeralMessageCaption(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.EditEphemeralMessageCaptionRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.EditEphemeralMessageCaption(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleEditEphemeralMessageReplyMarkup(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.EditEphemeralMessageReplyMarkupRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.EditEphemeralMessageReplyMarkup(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
+func (s *Server) handleDeleteEphemeralMessage(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
+	var req converter.DeleteEphemeralMessageRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.DeleteEphemeralMessage(c, &req)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
+}
+
 

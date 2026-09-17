@@ -13,7 +13,9 @@ import (
 )
 
 func isStringField(k string) bool {
-	return k == "business_connection_id" || k == "file_id" || strings.HasSuffix(k, "file_id") || k == "custom_emoji_id"
+	return k == "business_connection_id" || k == "file_id" || strings.HasSuffix(k, "file_id") || k == "custom_emoji_id" ||
+		k == "chat_join_request_query_id" || k == "custom_query_id" || k == "guest_query_id" || k == "owned_gift_id" ||
+		k == "telegram_payment_charge_id" || k == "inline_message_id" || k == "draft_id" || k == "method"
 }
 
 // bindRequest universally extracts and binds request parameters from:
