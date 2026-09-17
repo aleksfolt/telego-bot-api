@@ -100,7 +100,11 @@ func (r *RedisStore) SaveWebhook(ctx context.Context, token string, data *Webhoo
 	if err != nil {
 		return err
 	}
-	return r.client.Set(ctx, fmt.Sprintf("telego:webhook:%s", token), raw, 0).Err()
+	pipe := r.client.Pipeline()
+	pipe.Set(ctx, fmt.Sprintf("telego:webhook:%s", token), raw, 0)
+	pipe.SAdd(ctx, "telego:webhooks", token)
+	_, err = pipe.Exec(ctx)
+	return err
 }
 
 // GetWebhook returns webhook configuration for a bot.
@@ -122,7 +126,41 @@ func (r *RedisStore) GetWebhook(ctx context.Context, token string) (*WebhookData
 
 // DeleteWebhook removes webhook configuration.
 func (r *RedisStore) DeleteWebhook(ctx context.Context, token string) error {
-	return r.client.Del(ctx, fmt.Sprintf("telego:webhook:%s", token)).Err()
+	pipe := r.client.Pipeline()
+	pipe.Del(ctx, fmt.Sprintf("telego:webhook:%s", token))
+	pipe.SRem(ctx, "telego:webhooks", token)
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+// GetWebhookTokens returns tokens of all bots with active webhooks.
+func (r *RedisStore) GetWebhookTokens(ctx context.Context) ([]string, error) {
+	tokens, err := r.client.SMembers(ctx, "telego:webhooks").Result()
+	if err == nil && len(tokens) > 0 {
+		return tokens, nil
+	}
+
+	// Fallback: scan telego:webhook:* keys for existing databases
+	var result []string
+	var cursor uint64
+	for {
+		keys, nextCursor, err := r.client.Scan(ctx, cursor, "telego:webhook:*", 100).Result()
+		if err != nil {
+			break
+		}
+		for _, k := range keys {
+			t := strings.TrimPrefix(k, "telego:webhook:")
+			if t != "" && t != "telego:webhooks" {
+				result = append(result, t)
+				_ = r.client.SAdd(ctx, "telego:webhooks", t)
+			}
+		}
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+	return result, nil
 }
 
 // UpdateWebhookDeliveryError records the last webhook delivery failure.
