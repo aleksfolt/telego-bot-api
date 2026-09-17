@@ -25,8 +25,8 @@ type Config struct {
 // Load loads configuration from environment variables and command-line flags.
 func Load() *Config {
 	cfg := &Config{
-		AppID:         0,
-		AppHash:       "",
+		AppID:         2040,
+		AppHash:       "b18441a1ff607e10a989891a5462e627",
 		HTTPAddr:      "0.0.0.0:8081",
 		OutboundIPs:   nil,
 		RedisAddr:     "127.0.0.1:6379",

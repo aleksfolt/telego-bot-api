@@ -105,7 +105,7 @@ telego-bot-api/
 git clone https://github.com/aleksfolt/telego-bot-api.git
 cd telego-bot-api
 
-# 2. Задайте свои ключи Telegram и запустите контейнеры
+# 2. Задайте свои ключи Telegram (или используйте дефолтные) и запустите контейнеры
 export TELEGO_API_ID=2040
 export TELEGO_API_HASH="b18441a1ff607e10a989891a5462e627"
 
