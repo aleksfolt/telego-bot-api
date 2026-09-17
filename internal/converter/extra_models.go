@@ -997,3 +997,341 @@ type GetUserChatBoostsRequest struct {
 	ChatID int64 `json:"chat_id"`
 	UserID int64 `json:"user_id"`
 }
+
+// PreparedKeyboardButton represents a prepared keyboard button.
+type PreparedKeyboardButton struct {
+	ID string `json:"id"`
+}
+
+// ManagedBotAccessSettings represents access settings of a managed bot.
+type ManagedBotAccessSettings struct {
+	CanManageBot       bool    `json:"can_manage_bot"`
+	IsAccessRestricted bool    `json:"is_access_restricted"`
+	AddedUserIDs       []int64 `json:"added_user_ids,omitempty"`
+}
+
+// Gift represents a gift that can be sent by the bot.
+type Gift struct {
+	ID               string   `json:"id"`
+	Sticker          *Sticker `json:"sticker,omitempty"`
+	StarCount        int      `json:"star_count"`
+	UpgradeStarCount int      `json:"upgrade_star_count,omitempty"`
+	TotalCount       int      `json:"total_count,omitempty"`
+	RemainingCount   int      `json:"remaining_count,omitempty"`
+}
+
+// Gifts represents a list of gifts.
+type Gifts struct {
+	Gifts []Gift `json:"gifts"`
+}
+
+// OwnedGift represents a gift received by a user or chat.
+type OwnedGift struct {
+	ID            string `json:"id"`
+	Gift          Gift   `json:"gift"`
+	SendDate      int64  `json:"send_date,omitempty"`
+	SenderUser    *User  `json:"sender_user,omitempty"`
+	Text          string `json:"text,omitempty"`
+	CanBeUpgraded bool   `json:"can_be_upgraded,omitempty"`
+	IsSaved       bool   `json:"is_saved,omitempty"`
+}
+
+// UserGifts represents a list of gifts received by a user or chat.
+type UserGifts struct {
+	TotalCount int         `json:"total_count"`
+	Gifts      []OwnedGift `json:"gifts"`
+}
+
+// Story represents a story.
+type Story struct {
+	Chat Chat `json:"chat"`
+	ID   int  `json:"id"`
+}
+
+type AnswerChatJoinRequestQueryRequest struct {
+	ChatJoinRequestQueryID string `json:"chat_join_request_query_id"`
+	Result                 string `json:"result"`
+}
+
+type SendChatJoinRequestWebAppRequest struct {
+	ChatJoinRequestQueryID string `json:"chat_join_request_query_id"`
+	WebAppURL              string `json:"web_app_url"`
+}
+
+type AnswerCustomQueryRequest struct {
+	CustomQueryID string `json:"custom_query_id"`
+	Data          string `json:"data"`
+}
+
+type SendCustomRequestRequest struct {
+	Method     string          `json:"method"`
+	Parameters json.RawMessage `json:"parameters,omitempty"`
+}
+
+type AnswerGuestQueryRequest struct {
+	GuestQueryID string          `json:"guest_query_id"`
+	Result       json.RawMessage `json:"result"`
+}
+
+type ApproveSuggestedPostRequest struct {
+	ChatID    int64 `json:"chat_id"`
+	MessageID int64 `json:"message_id"`
+	SendDate  int   `json:"send_date,omitempty"`
+}
+
+type DeclineSuggestedPostRequest struct {
+	ChatID    int64  `json:"chat_id"`
+	MessageID int64  `json:"message_id"`
+	Comment   string `json:"comment,omitempty"`
+}
+
+type ConvertGiftToStarsRequest struct {
+	BusinessConnectionID string `json:"business_connection_id"`
+	OwnedGiftID          string `json:"owned_gift_id"`
+}
+
+type UpgradeGiftRequest struct {
+	BusinessConnectionID string `json:"business_connection_id"`
+	OwnedGiftID          string `json:"owned_gift_id"`
+	KeepOriginalDetails  bool   `json:"keep_original_details,omitempty"`
+	StarCount            int64  `json:"star_count,omitempty"`
+}
+
+type TransferGiftRequest struct {
+	BusinessConnectionID string `json:"business_connection_id"`
+	OwnedGiftID          string `json:"owned_gift_id"`
+	NewOwnerChatID       int64  `json:"new_owner_chat_id"`
+	StarCount            int64  `json:"star_count,omitempty"`
+}
+
+type GetChatGiftsRequest struct {
+	ChatID                      int64  `json:"chat_id"`
+	ExcludeUnsaved              bool   `json:"exclude_unsaved,omitempty"`
+	ExcludeSaved                bool   `json:"exclude_saved,omitempty"`
+	ExcludeUnlimited            bool   `json:"exclude_unlimited,omitempty"`
+	ExcludeLimitedUpgradable    bool   `json:"exclude_limited_upgradable,omitempty"`
+	ExcludeLimitedNonUpgradable bool   `json:"exclude_limited_non_upgradable,omitempty"`
+	ExcludeUnique               bool   `json:"exclude_unique,omitempty"`
+	SortByPrice                 bool   `json:"sort_by_price,omitempty"`
+	Offset                      string `json:"offset,omitempty"`
+	Limit                       int    `json:"limit,omitempty"`
+}
+
+type GetUserGiftsRequest struct {
+	UserID                      int64  `json:"user_id"`
+	ExcludeUnlimited            bool   `json:"exclude_unlimited,omitempty"`
+	ExcludeLimitedUpgradable    bool   `json:"exclude_limited_upgradable,omitempty"`
+	ExcludeLimitedNonUpgradable bool   `json:"exclude_limited_non_upgradable,omitempty"`
+	ExcludeUnique               bool   `json:"exclude_unique,omitempty"`
+	SortByPrice                 bool   `json:"sort_by_price,omitempty"`
+	Offset                      string `json:"offset,omitempty"`
+	Limit                       int    `json:"limit,omitempty"`
+}
+
+type GetBusinessAccountGiftsRequest struct {
+	BusinessConnectionID        string `json:"business_connection_id"`
+	ExcludeUnsaved              bool   `json:"exclude_unsaved,omitempty"`
+	ExcludeSaved                bool   `json:"exclude_saved,omitempty"`
+	ExcludeUnlimited            bool   `json:"exclude_unlimited,omitempty"`
+	ExcludeLimitedUpgradable    bool   `json:"exclude_limited_upgradable,omitempty"`
+	ExcludeLimitedNonUpgradable bool   `json:"exclude_limited_non_upgradable,omitempty"`
+	ExcludeUnique               bool   `json:"exclude_unique,omitempty"`
+	SortByPrice                 bool   `json:"sort_by_price,omitempty"`
+	Offset                      string `json:"offset,omitempty"`
+	Limit                       int    `json:"limit,omitempty"`
+}
+
+type GetBusinessAccountStarBalanceRequest struct {
+	BusinessConnectionID string `json:"business_connection_id"`
+}
+
+type TransferBusinessAccountStarsRequest struct {
+	BusinessConnectionID string `json:"business_connection_id"`
+	StarCount            int64  `json:"star_count"`
+}
+
+type SetBusinessAccountGiftSettingsRequest struct {
+	BusinessConnectionID string          `json:"business_connection_id"`
+	ShowGiftButton       bool            `json:"show_gift_button"`
+	AcceptedGiftTypes    json.RawMessage `json:"accepted_gift_types,omitempty"`
+}
+
+type SetBusinessAccountProfilePhotoRequest struct {
+	BusinessConnectionID string `json:"business_connection_id"`
+	Photo                string `json:"photo"`
+	IsPublic             bool   `json:"is_public,omitempty"`
+	PhotoData            []byte `json:"-"`
+}
+
+type GetManagedBotTokenRequest struct {
+	UserID int64 `json:"user_id"`
+}
+
+type GetManagedBotAccessSettingsRequest struct {
+	UserID int64 `json:"user_id"`
+}
+
+type SetManagedBotAccessSettingsRequest struct {
+	UserID             int64   `json:"user_id"`
+	IsAccessRestricted bool    `json:"is_access_restricted"`
+	AddedUserIDs       []int64 `json:"added_user_ids,omitempty"`
+}
+
+type ReplaceManagedBotTokenRequest struct {
+	UserID int64 `json:"user_id"`
+}
+
+type GetUserPersonalChatMessagesRequest struct {
+	UserID int64 `json:"user_id"`
+	Limit  int   `json:"limit,omitempty"`
+}
+
+type GiftPremiumSubscriptionRequest struct {
+	UserID        int64  `json:"user_id"`
+	MonthCount    int    `json:"month_count"`
+	StarCount     int64  `json:"star_count,omitempty"`
+	Text          string `json:"text,omitempty"`
+	TextParseMode string `json:"text_parse_mode,omitempty"`
+}
+
+type EditUserStarSubscriptionRequest struct {
+	UserID                  int64  `json:"user_id"`
+	TelegramPaymentChargeID string `json:"telegram_payment_charge_id"`
+	IsCanceled              bool   `json:"is_canceled"`
+}
+
+type RepostStoryRequest struct {
+	BusinessConnectionID string `json:"business_connection_id"`
+	FromChatID           int64  `json:"from_chat_id"`
+	StoryID              int    `json:"story_id"`
+	ActivePeriod         int    `json:"active_period,omitempty"`
+	ProtectContent       bool   `json:"protect_content,omitempty"`
+	PostToChatPage       bool   `json:"post_to_chat_page,omitempty"`
+}
+
+type EditStoryRequest struct {
+	BusinessConnectionID string            `json:"business_connection_id"`
+	StoryID              int               `json:"story_id"`
+	Content              json.RawMessage   `json:"content,omitempty"`
+	Caption              string            `json:"caption,omitempty"`
+	ParseMode            string            `json:"parse_mode,omitempty"`
+	CaptionEntities      []MessageEntity   `json:"caption_entities,omitempty"`
+	Areas                json.RawMessage   `json:"areas,omitempty"`
+	Files                map[string][]byte `json:"-"`
+	FileNames            map[string]string `json:"-"`
+}
+
+type SavePreparedKeyboardButtonRequest struct {
+	UserID int64           `json:"user_id"`
+	Button json.RawMessage `json:"button"`
+}
+
+type SendLivePhotoRequest struct {
+	BusinessConnectionID  string           `json:"business_connection_id,omitempty"`
+	ChatID                int64            `json:"chat_id"`
+	MessageThreadID       int              `json:"message_thread_id,omitempty"`
+	Photo                 string           `json:"photo"`
+	LivePhoto             string           `json:"live_photo"`
+	Caption               string           `json:"caption,omitempty"`
+	ParseMode             string           `json:"parse_mode,omitempty"`
+	CaptionEntities       []MessageEntity  `json:"caption_entities,omitempty"`
+	HasSpoiler            bool             `json:"has_spoiler,omitempty"`
+	ShowCaptionAboveMedia bool             `json:"show_caption_above_media,omitempty"`
+	DisableNotification   bool             `json:"disable_notification,omitempty"`
+	ProtectContent        bool             `json:"protect_content,omitempty"`
+	ReplyParameters       *ReplyParameters `json:"reply_parameters,omitempty"`
+	ReplyMarkup           json.RawMessage  `json:"reply_markup,omitempty"`
+	PhotoData             []byte           `json:"-"`
+	LivePhotoData         []byte           `json:"-"`
+}
+
+type SendMessageDraftRequest struct {
+	ChatID          int64           `json:"chat_id"`
+	MessageThreadID int             `json:"message_thread_id,omitempty"`
+	DraftID         int64           `json:"draft_id,omitempty"`
+	Text            string          `json:"text"`
+	ParseMode       string          `json:"parse_mode,omitempty"`
+	Entities        []MessageEntity `json:"entities,omitempty"`
+	CanStop         bool            `json:"can_stop,omitempty"`
+	KeepOnStop      bool            `json:"keep_on_stop,omitempty"`
+}
+
+type SendRichMessageDraftRequest struct {
+	ChatID          int64           `json:"chat_id"`
+	MessageThreadID int             `json:"message_thread_id,omitempty"`
+	DraftID         int64           `json:"draft_id,omitempty"`
+	CanStop         bool            `json:"can_stop,omitempty"`
+	KeepOnStop      bool            `json:"keep_on_stop,omitempty"`
+	RichMessage     json.RawMessage `json:"rich_message,omitempty"`
+}
+
+type SendRichMessageRequest struct {
+	BusinessConnectionID string          `json:"business_connection_id,omitempty"`
+	ChatID               int64           `json:"chat_id"`
+	MessageThreadID      int             `json:"message_thread_id,omitempty"`
+	RichMessage          json.RawMessage `json:"rich_message"`
+}
+
+type SendChecklistRequest struct {
+	BusinessConnectionID string          `json:"business_connection_id,omitempty"`
+	ChatID               int64           `json:"chat_id"`
+	MessageThreadID      int             `json:"message_thread_id,omitempty"`
+	Checklist            json.RawMessage `json:"checklist"`
+	ReplyMarkup          json.RawMessage `json:"reply_markup,omitempty"`
+}
+
+type EditMessageChecklistRequest struct {
+	BusinessConnectionID string          `json:"business_connection_id,omitempty"`
+	ChatID               int64           `json:"chat_id"`
+	MessageID            int64           `json:"message_id"`
+	Checklist            json.RawMessage `json:"checklist,omitempty"`
+	ReplyMarkup          json.RawMessage `json:"reply_markup,omitempty"`
+}
+
+type EditEphemeralMessageTextRequest struct {
+	ChatID             int64           `json:"chat_id"`
+	UserID             int64           `json:"user_id,omitempty"`
+	ReceiverUserID     int64           `json:"receiver_user_id,omitempty"`
+	EphemeralMessageID int64           `json:"ephemeral_message_id"`
+	Text               string          `json:"text"`
+	ParseMode          string          `json:"parse_mode,omitempty"`
+	Entities           []MessageEntity `json:"entities,omitempty"`
+	ReplyMarkup        json.RawMessage `json:"reply_markup,omitempty"`
+}
+
+type EditEphemeralMessageMediaRequest struct {
+	ChatID             int64           `json:"chat_id"`
+	UserID             int64           `json:"user_id,omitempty"`
+	ReceiverUserID     int64           `json:"receiver_user_id,omitempty"`
+	EphemeralMessageID int64           `json:"ephemeral_message_id"`
+	Media              json.RawMessage `json:"media"`
+	ReplyMarkup        json.RawMessage `json:"reply_markup,omitempty"`
+}
+
+type EditEphemeralMessageCaptionRequest struct {
+	ChatID                int64           `json:"chat_id"`
+	UserID                int64           `json:"user_id,omitempty"`
+	ReceiverUserID        int64           `json:"receiver_user_id,omitempty"`
+	EphemeralMessageID    int64           `json:"ephemeral_message_id"`
+	Caption               string          `json:"caption,omitempty"`
+	ParseMode             string          `json:"parse_mode,omitempty"`
+	CaptionEntities       []MessageEntity `json:"caption_entities,omitempty"`
+	ShowCaptionAboveMedia bool            `json:"show_caption_above_media,omitempty"`
+	ReplyMarkup           json.RawMessage `json:"reply_markup,omitempty"`
+}
+
+type EditEphemeralMessageReplyMarkupRequest struct {
+	ChatID             int64           `json:"chat_id"`
+	UserID             int64           `json:"user_id,omitempty"`
+	ReceiverUserID     int64           `json:"receiver_user_id,omitempty"`
+	EphemeralMessageID int64           `json:"ephemeral_message_id"`
+	ReplyMarkup        json.RawMessage `json:"reply_markup,omitempty"`
+}
+
+type DeleteEphemeralMessageRequest struct {
+	ChatID             int64 `json:"chat_id"`
+	UserID             int64 `json:"user_id,omitempty"`
+	ReceiverUserID     int64 `json:"receiver_user_id,omitempty"`
+	EphemeralMessageID int64 `json:"ephemeral_message_id"`
+}
+

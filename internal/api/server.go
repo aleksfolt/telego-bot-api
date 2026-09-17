@@ -492,6 +492,96 @@ func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 	case "setchatmembertag":
 		s.handleSetChatMemberTag(ctx, bot)
 
+	// Web App & Join Requests & Custom Queries
+	case "answerchatjoinrequestquery":
+		s.handleAnswerChatJoinRequestQuery(ctx, bot)
+	case "sendchatjoinrequestwebapp":
+		s.handleSendChatJoinRequestWebApp(ctx, bot)
+	case "answercustomquery":
+		s.handleAnswerCustomQuery(ctx, bot)
+	case "sendcustomrequest":
+		s.handleSendCustomRequest(ctx, bot)
+	case "answerguestquery":
+		s.handleAnswerGuestQuery(ctx, bot)
+
+	// Channel Suggested Posts
+	case "approvesuggestedpost":
+		s.handleApproveSuggestedPost(ctx, bot)
+	case "declinesuggestedpost":
+		s.handleDeclineSuggestedPost(ctx, bot)
+
+	// Stars, Gifts & Premium
+	case "convertgifttostars":
+		s.handleConvertGiftToStars(ctx, bot)
+	case "upgradegift":
+		s.handleUpgradeGift(ctx, bot)
+	case "transfergift":
+		s.handleTransferGift(ctx, bot)
+	case "getchatgifts":
+		s.handleGetChatGifts(ctx, bot)
+	case "getusergifts":
+		s.handleGetUserGifts(ctx, bot)
+	case "getbusinessaccountgifts":
+		s.handleGetBusinessAccountGifts(ctx, bot)
+	case "getbusinessaccountstarbalance":
+		s.handleGetBusinessAccountStarBalance(ctx, bot)
+	case "transferbusinessaccountstars":
+		s.handleTransferBusinessAccountStars(ctx, bot)
+	case "setbusinessaccountgiftsettings":
+		s.handleSetBusinessAccountGiftSettings(ctx, bot)
+	case "setbusinessaccountprofilephoto":
+		s.handleSetBusinessAccountProfilePhoto(ctx, bot)
+	case "giftpremiumsubscription":
+		s.handleGiftPremiumSubscription(ctx, bot)
+	case "edituserstarsubscription":
+		s.handleEditUserStarSubscription(ctx, bot)
+
+	// Managed Bots API
+	case "getmanagedbottoken":
+		s.handleGetManagedBotToken(ctx, bot)
+	case "getmanagedbotaccesssettings":
+		s.handleGetManagedBotAccessSettings(ctx, bot)
+	case "setmanagedbotaccesssettings":
+		s.handleSetManagedBotAccessSettings(ctx, bot)
+	case "replacemanagedbottoken":
+		s.handleReplaceManagedBotToken(ctx, bot)
+
+	// Personal Messages & Stories & Keyboards
+	case "getuserpersonalchatmessages":
+		s.handleGetUserPersonalChatMessages(ctx, bot)
+	case "repoststory":
+		s.handleRepostStory(ctx, bot)
+	case "editstory":
+		s.handleEditStory(ctx, bot)
+	case "savepreparedkeyboardbutton":
+		s.handleSavePreparedKeyboardButton(ctx, bot)
+
+	// Live Photo, Drafts, Rich Message, Checklists
+	case "sendlivephoto":
+		s.handleSendLivePhoto(ctx, bot)
+	case "sendmessagedraft":
+		s.handleSendMessageDraft(ctx, bot)
+	case "sendrichmessagedraft":
+		s.handleSendRichMessageDraft(ctx, bot)
+	case "sendrichmessage":
+		s.handleSendRichMessage(ctx, bot)
+	case "sendchecklist":
+		s.handleSendChecklist(ctx, bot)
+	case "editmessagechecklist":
+		s.handleEditMessageChecklist(ctx, bot)
+
+	// Ephemeral Messages
+	case "editephemeralmessagetext":
+		s.handleEditEphemeralMessageText(ctx, bot)
+	case "editephemeralmessagemedia":
+		s.handleEditEphemeralMessageMedia(ctx, bot)
+	case "editephemeralmessagecaption":
+		s.handleEditEphemeralMessageCaption(ctx, bot)
+	case "editephemeralmessagereplymarkup":
+		s.handleEditEphemeralMessageReplyMarkup(ctx, bot)
+	case "deleteephemeralmessage":
+		s.handleDeleteEphemeralMessage(ctx, bot)
+
 	default:
 		s.respondError(ctx, 404, "Not Found: method not supported yet in telego-bot-api: "+method)
 	}
