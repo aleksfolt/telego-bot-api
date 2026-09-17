@@ -1,6 +1,7 @@
 services:
   redis:
     image: redis:7-alpine
+    container_name: telego-redis
     restart: unless-stopped
     command: redis-server --appendonly yes --appendfsync everysec
     ports:
@@ -14,7 +15,10 @@ services:
       retries: 5
 
   telego-bot-api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: telego-bot-api
     restart: unless-stopped
     depends_on:
       redis:
@@ -24,10 +28,12 @@ services:
     environment:
       - TELEGO_API_ID=${TELEGO_API_ID:-0}
       - TELEGO_API_HASH=${TELEGO_API_HASH:-}
-      - TELEGO_HTTP_ADDR=0.0.0.0:8082
+      - TELEGO_HTTP_ADDR=${TELEGO_HTTP_ADDR:-0.0.0.0:8082}
       - TELEGO_REDIS_ADDR=redis:6379
-      - TELEGO_LOG_LEVEL=info
-      - TELEGO_LOG_FORMAT=json
+      - TELEGO_REDIS_PASSWORD=${TELEGO_REDIS_PASSWORD:-}
+      - TELEGO_LOG_LEVEL=${TELEGO_LOG_LEVEL:-info}
+      - TELEGO_LOG_FORMAT=${TELEGO_LOG_FORMAT:-json}
+      - TELEGO_PPROF_ADDR=${TELEGO_PPROF_ADDR:-}
     ulimits:
       nofile:
         soft: 65536
