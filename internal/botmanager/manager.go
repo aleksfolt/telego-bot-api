@@ -78,6 +78,11 @@ func (m *Manager) LoadAndStartAll(ctx context.Context) error {
 			wg.Add(1)
 			go func(t string) {
 				defer wg.Done()
+				defer func() {
+					if r := recover(); r != nil {
+						m.logger.Error("PANIC recovered in webhook bot restore", zap.Any("panic", r))
+					}
+				}()
 				sem <- struct{}{}
 				defer func() { <-sem }()
 

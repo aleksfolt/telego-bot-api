@@ -171,6 +171,15 @@ func (b *BotInstance) Start(ctx context.Context) error {
 	errChan := make(chan error, 1)
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				b.logger.Error("PANIC recovered in bot client loop",
+					zap.Any("panic", r),
+					zap.String("token_prefix", b.token[:min(10, len(b.token))]),
+				)
+			}
+		}()
+
 		backoff := 1 * time.Second
 		maxBackoff := 30 * time.Second
 		firstRun := true
