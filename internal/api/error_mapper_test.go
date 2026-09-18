@@ -105,6 +105,31 @@ func TestMapRpcError_StandardErrors(t *testing.T) {
 			expectedCode: 400,
 			expectedDesc: "Bad Request: BUSINESS_PEER_INVALID",
 		},
+		{
+			rpcErr:       fmt.Errorf("rpcDoRequest: rpc error code 400: SLOWMODE_WAIT_20"),
+			expectedCode: 429,
+			expectedDesc: "Too Many Requests: retry after 20",
+		},
+		{
+			rpcErr:       tgerr.New(401, "SESSION_REVOKED"),
+			expectedCode: 401,
+			expectedDesc: "Unauthorized: bot token is invalid or revoked",
+		},
+		{
+			rpcErr:       tgerr.New(403, "CHAT_WRITE_FORBIDDEN"),
+			expectedCode: 403,
+			expectedDesc: "Forbidden: not enough rights to send text messages to the chat",
+		},
+		{
+			rpcErr:       tgerr.New(400, "TOPIC_CLOSED"),
+			expectedCode: 400,
+			expectedDesc: "Bad Request: message thread is closed",
+		},
+		{
+			rpcErr:       tgerr.New(400, "MESSAGE_TOO_LONG"),
+			expectedCode: 400,
+			expectedDesc: "Bad Request: message is too long",
+		},
 	}
 
 	for _, tc := range tests {
