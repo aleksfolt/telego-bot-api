@@ -1064,7 +1064,12 @@ func (b *BotInstance) SendMessage(ctx context.Context, req *converter.SendMessag
 	}
 
 	if len(req.ReplyMarkup) > 0 {
-		markup, _ := converter.ParseReplyMarkup(req.ReplyMarkup)
+		markup, err := converter.ParseReplyMarkup(req.ReplyMarkup)
+		if err != nil {
+			b.logger.Warn("Failed to parse reply markup", zap.Error(err))
+		} else {
+			b.logger.Info("SendMessage with reply_markup", zap.ByteString("raw", req.ReplyMarkup))
+		}
 		sendReq.ReplyMarkup = markup
 	}
 
@@ -1103,15 +1108,24 @@ func (b *BotInstance) SendMessage(ctx context.Context, req *converter.SendMessag
 		}
 	}
 
-	msgID := extractSentMessageID(updates)
+	msgID, sentMarkup := extractSentMessage(updates)
+	var botApiMarkup *converter.InlineKeyboardMarkup
+	if sentMarkup != nil {
+		botApiMarkup = converter.ConvertMTProtoReplyMarkup(sentMarkup)
+	} else if len(req.ReplyMarkup) > 0 {
+		if m, err := converter.ParseReplyMarkup(req.ReplyMarkup); err == nil && m != nil {
+			botApiMarkup = converter.ConvertMTProtoReplyMarkup(m)
+		}
+	}
 
 	return &converter.Message{
-		MessageID: msgID,
-		From:      b.GetMe(),
-		Chat:      converter.Chat{ID: req.ChatID},
-		Date:      int(time.Now().Unix()),
-		Text:      text,
-		Entities:  req.Entities,
+		MessageID:   msgID,
+		From:        b.GetMe(),
+		Chat:        converter.Chat{ID: req.ChatID},
+		Date:        int(time.Now().Unix()),
+		Text:        text,
+		Entities:    req.Entities,
+		ReplyMarkup: botApiMarkup,
 	}, nil
 }
 
@@ -2633,44 +2647,49 @@ func describeUpdateSender(upd *converter.Update) string {
 	return desc
 }
 
-func extractSentMessageID(updates tg.UpdatesClass) int64 {
+func extractSentMessage(updates tg.UpdatesClass) (int64, tg.ReplyMarkupClass) {
 	switch u := updates.(type) {
 	case *tg.Updates:
 		for _, upd := range u.Updates {
 			switch m := upd.(type) {
-			case *tg.UpdateMessageID:
-				return int64(m.ID)
 			case *tg.UpdateNewMessage:
 				if msg, ok := m.Message.(*tg.Message); ok {
-					return int64(msg.ID)
+					return int64(msg.ID), msg.ReplyMarkup
 				}
 			case *tg.UpdateNewChannelMessage:
 				if msg, ok := m.Message.(*tg.Message); ok {
-					return int64(msg.ID)
+					return int64(msg.ID), msg.ReplyMarkup
 				}
+			case *tg.UpdateMessageID:
+				return int64(m.ID), nil
 			}
 		}
 	case *tg.UpdateShortSentMessage:
-		return int64(u.ID)
+		return int64(u.ID), nil
 	case *tg.UpdateShortMessage:
-		return int64(u.ID)
+		return int64(u.ID), nil
 	case *tg.UpdatesCombined:
 		for _, upd := range u.Updates {
 			switch m := upd.(type) {
-			case *tg.UpdateMessageID:
-				return int64(m.ID)
 			case *tg.UpdateNewMessage:
 				if msg, ok := m.Message.(*tg.Message); ok {
-					return int64(msg.ID)
+					return int64(msg.ID), msg.ReplyMarkup
 				}
 			case *tg.UpdateNewChannelMessage:
 				if msg, ok := m.Message.(*tg.Message); ok {
-					return int64(msg.ID)
+					return int64(msg.ID), msg.ReplyMarkup
 				}
+			case *tg.UpdateMessageID:
+				return int64(m.ID), nil
 			}
 		}
 	}
-	return 0
+	return 0, nil
+}
+
+func extractSentMessageID(updates tg.UpdatesClass) int64 {
+	id, _ := extractSentMessage(updates)
+	return id
 }
 
 func min(a, b int) int {
