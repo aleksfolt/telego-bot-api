@@ -77,13 +77,23 @@ func TestMapRpcError_StandardErrors(t *testing.T) {
 		},
 		{
 			rpcErr:       tgerr.New(401, "AUTH_KEY_UNREGISTERED"),
+			expectedCode: 401,
+			expectedDesc: "Unauthorized: bot token is invalid or revoked",
+		},
+		{
+			rpcErr:       fmt.Errorf("rpcDoRequest: rpc error code 401: AUTH_KEY_UNREGISTERED"),
+			expectedCode: 401,
+			expectedDesc: "Unauthorized: bot token is invalid or revoked",
+		},
+		{
+			rpcErr:       fmt.Errorf("business connection invalid: rpc error code 401: AUTH_KEY_UNREGISTERED"),
 			expectedCode: 400,
 			expectedDesc: "Bad Request: BUSINESS_CONNECTION_INVALID",
 		},
 		{
-			rpcErr:       fmt.Errorf("rpcDoRequest: rpc error code 401: AUTH_KEY_UNREGISTERED"),
-			expectedCode: 400,
-			expectedDesc: "Bad Request: BUSINESS_CONNECTION_INVALID",
+			rpcErr:       tgerr.New(401, "TOKEN_INVALID"),
+			expectedCode: 401,
+			expectedDesc: "Unauthorized: bot token is invalid or revoked",
 		},
 		{
 			rpcErr:       tgerr.New(400, "BUSINESS_CONNECTION_INVALID"),

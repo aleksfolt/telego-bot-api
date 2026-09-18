@@ -136,6 +136,7 @@ func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 
 	token := parts[0]
 	method := strings.ToLower(parts[1])
+	ctx.SetUserValue("bot_token", token)
 
 	start := time.Now()
 	defer func() {
@@ -689,6 +690,15 @@ func (s *Server) handleSendMessage(ctx *fasthttp.RequestCtx, bot *botmanager.Bot
 	defer cancel()
 
 	msg, err := bot.SendMessage(c, &req)
+	if err != nil && req.BusinessConnectionID == "" && strings.Contains(err.Error(), "AUTH_KEY_UNREGISTERED") {
+		s.logger.Warn("Bot auth key unregistered, resetting session and retrying SendMessage",
+			zap.String("token_prefix", bot.Token()[:min(10, len(bot.Token()))]),
+		)
+		s.botManager.ResetBot(bot.Token())
+		if freshBot, freshErr := s.botManager.GetOrCreate(context.Background(), bot.Token()); freshErr == nil {
+			msg, err = freshBot.SendMessage(c, &req)
+		}
+	}
 	if err != nil {
 		s.logger.Error("SendMessage failed", zap.Error(err))
 		s.respondError(ctx, 400, "Bad Request: "+err.Error())
@@ -708,6 +718,15 @@ func (s *Server) handleEditMessageText(ctx *fasthttp.RequestCtx, bot *botmanager
 	defer cancel()
 
 	msg, err := bot.EditMessageText(c, &req)
+	if err != nil && req.BusinessConnectionID == "" && strings.Contains(err.Error(), "AUTH_KEY_UNREGISTERED") {
+		s.logger.Warn("Bot auth key unregistered, resetting session and retrying EditMessageText",
+			zap.String("token_prefix", bot.Token()[:min(10, len(bot.Token()))]),
+		)
+		s.botManager.ResetBot(bot.Token())
+		if freshBot, freshErr := s.botManager.GetOrCreate(context.Background(), bot.Token()); freshErr == nil {
+			msg, err = freshBot.EditMessageText(c, &req)
+		}
+	}
 	if err != nil {
 		s.respondError(ctx, 400, "Bad Request: "+err.Error())
 		return
@@ -1661,8 +1680,17 @@ func (s *Server) respondError(ctx *fasthttp.RequestCtx, code int, desc string) {
 	// If generic 400 was provided, attempt intelligent mapping of RPC error messages
 	if code == 400 {
 		if mappedCode, mappedDesc, params := MapErrorString(desc); mappedCode != 400 || params != nil || mappedDesc != desc {
+			if mappedCode == 401 {
+				if t, ok := ctx.UserValue("bot_token").(string); ok && t != "" {
+					s.botManager.ResetBot(t)
+				}
+			}
 			s.respondErrorWithParams(ctx, mappedCode, mappedDesc, params)
 			return
+		}
+	} else if code == 401 {
+		if t, ok := ctx.UserValue("bot_token").(string); ok && t != "" {
+			s.botManager.ResetBot(t)
 		}
 	}
 	s.respondErrorWithParams(ctx, code, desc, nil)

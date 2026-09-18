@@ -75,7 +75,15 @@ func MapErrorString(desc string) (int, string, *converter.ResponseParameters) {
 		}
 	}
 
-	// 3. Forbidden errors (403)
+	// 3. Unauthorized errors (401)
+	if strings.Contains(desc, "TOKEN_INVALID") ||
+		strings.Contains(desc, "EXPIRED_BOT_TOKEN") ||
+		strings.Contains(desc, "BOT_TOKEN_INVALID") ||
+		(strings.Contains(desc, "AUTH_KEY_UNREGISTERED") && !strings.Contains(strings.ToLower(desc), "business")) {
+		return 401, "Unauthorized: bot token is invalid or revoked", nil
+	}
+
+	// 4. Forbidden errors (403)
 	if strings.Contains(desc, "BOT_BLOCKED") || strings.Contains(desc, "USER_IS_BLOCKED") {
 		return 403, "Forbidden: bot was blocked by the user", nil
 	}
@@ -83,7 +91,7 @@ func MapErrorString(desc string) (int, string, *converter.ResponseParameters) {
 		return 403, "Forbidden: user is deactivated", nil
 	}
 
-	// 4. Bad Request errors (400)
+	// 5. Bad Request errors (400)
 	switch {
 	case strings.Contains(desc, "CHAT_NOT_FOUND") || strings.Contains(desc, "PEER_ID_INVALID"):
 		return 400, "Bad Request: chat not found", nil
@@ -103,7 +111,8 @@ func MapErrorString(desc string) (int, string, *converter.ResponseParameters) {
 		return 400, "Bad Request: BUTTON_URL_INVALID", nil
 	case strings.Contains(desc, "BUTTON_DATA_INVALID"):
 		return 400, "Bad Request: BUTTON_DATA_INVALID", nil
-	case strings.Contains(desc, "BUSINESS_CONNECTION_INVALID") || strings.Contains(desc, "AUTH_KEY_UNREGISTERED"):
+	case strings.Contains(desc, "BUSINESS_CONNECTION_INVALID") ||
+		(strings.Contains(desc, "AUTH_KEY_UNREGISTERED") && strings.Contains(strings.ToLower(desc), "business")):
 		return 400, "Bad Request: BUSINESS_CONNECTION_INVALID", nil
 	case strings.Contains(desc, "BUSINESS_PEER_INVALID"):
 		return 400, "Bad Request: BUSINESS_PEER_INVALID", nil
