@@ -14,7 +14,7 @@ import (
 	"github.com/gotd/td/tgerr"
 )
 
-var floodRegex = regexp.MustCompile(`FLOOD_(?:PREMIUM_)?WAIT_(\d+)`)
+var floodRegex = regexp.MustCompile(`(?:FLOOD_(?:PREMIUM_)?WAIT_|SLOWMODE_WAIT_)(\d+)`)
 var migrateRegex = regexp.MustCompile(`MIGRATE_TO_(\d+)`)
 
 // MapRpcError converts an internal MTProto / gotd error into standard Telegram Bot API
@@ -79,6 +79,7 @@ func MapErrorString(desc string) (int, string, *converter.ResponseParameters) {
 	if strings.Contains(desc, "TOKEN_INVALID") ||
 		strings.Contains(desc, "EXPIRED_BOT_TOKEN") ||
 		strings.Contains(desc, "BOT_TOKEN_INVALID") ||
+		strings.Contains(desc, "SESSION_REVOKED") ||
 		(strings.Contains(desc, "AUTH_KEY_UNREGISTERED") && !strings.Contains(strings.ToLower(desc), "business")) {
 		return 401, "Unauthorized: bot token is invalid or revoked", nil
 	}
@@ -89,6 +90,9 @@ func MapErrorString(desc string) (int, string, *converter.ResponseParameters) {
 	}
 	if strings.Contains(desc, "USER_DEACTIVATED") {
 		return 403, "Forbidden: user is deactivated", nil
+	}
+	if strings.Contains(desc, "CHAT_WRITE_FORBIDDEN") || strings.Contains(desc, "CHAT_SEND_PLAIN_FORBIDDEN") {
+		return 403, "Forbidden: not enough rights to send text messages to the chat", nil
 	}
 
 	// 5. Bad Request errors (400)
@@ -107,6 +111,14 @@ func MapErrorString(desc string) (int, string, *converter.ResponseParameters) {
 		return 400, "Bad Request: message to edit not found", nil
 	case strings.Contains(desc, "MESSAGE_EMPTY"):
 		return 400, "Bad Request: message text is empty", nil
+	case strings.Contains(desc, "MESSAGE_TOO_LONG"):
+		return 400, "Bad Request: message is too long", nil
+	case strings.Contains(desc, "MEDIA_CAPTION_TOO_LONG"):
+		return 400, "Bad Request: media caption is too long", nil
+	case strings.Contains(desc, "TOPIC_CLOSED"):
+		return 400, "Bad Request: message thread is closed", nil
+	case strings.Contains(desc, "TOPIC_DELETED"):
+		return 400, "Bad Request: message thread not found", nil
 	case strings.Contains(desc, "BUTTON_URL_INVALID"):
 		return 400, "Bad Request: BUTTON_URL_INVALID", nil
 	case strings.Contains(desc, "BUTTON_DATA_INVALID"):
