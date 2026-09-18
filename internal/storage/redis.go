@@ -498,6 +498,11 @@ func (r *RedisStore) GetBotProfile(ctx context.Context, token string) ([]byte, e
 	return val, err
 }
 
+// DeleteBotProfile removes cached bot User profile JSON from Redis.
+func (r *RedisStore) DeleteBotProfile(ctx context.Context, token string) error {
+	return r.client.Del(ctx, fmt.Sprintf("telego:profile:%s", token)).Err()
+}
+
 // SaveBusinessConnection caches a serialized BusinessConnection in Redis.
 func (r *RedisStore) SaveBusinessConnection(ctx context.Context, connectionID string, data []byte) error {
 	return r.client.Set(ctx, fmt.Sprintf("telego:busconn:%s", connectionID), data, 30*24*time.Hour).Err()

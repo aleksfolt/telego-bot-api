@@ -215,6 +215,25 @@ func (m *Manager) CloseBot(token string) bool {
 	return false
 }
 
+// ResetBot unloads an active bot instance and purges its MTProto session from Redis.
+// This is used when Telegram DC invalidates the auth key (AUTH_KEY_UNREGISTERED),
+// forcing a fresh MTProto DH exchange and authentication on the next call.
+func (m *Manager) ResetBot(token string) {
+	m.mu.Lock()
+	bot, ok := m.bots[token]
+	if ok {
+		delete(m.bots, token)
+	}
+	m.mu.Unlock()
+
+	if ok {
+		bot.Stop()
+	}
+	_ = m.redisStore.DeleteSession(context.Background(), token)
+	_ = m.redisStore.DeleteBotProfile(context.Background(), token)
+	m.logger.Warn("Bot session reset and purged from Redis", zap.String("token_prefix", token[:min(10, len(token))]))
+}
+
 // StopAll gracefully shuts down all active bot instances and stops background janitors.
 func (m *Manager) StopAll() {
 	if m.janitorCancel != nil {

@@ -26,6 +26,7 @@ import (
 	"telego-bot-api/internal/webhook"
 
 	"github.com/gotd/log/logzap"
+	"github.com/gotd/td/bin"
 	"github.com/gotd/td/fileid"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/dcs"
@@ -120,6 +121,7 @@ func NewBotInstance(
 		SessionStorage: redisStore.SessionStorage(token),
 		UpdateHandler:  bot,
 		Logger:         logzap.New(logging.MTProtoLogger(logger, mtprotoDebug)),
+		Middlewares:    []telegram.Middleware{businessErrorMiddleware{}},
 	}
 
 	if dialer != nil {
@@ -130,6 +132,27 @@ func NewBotInstance(
 
 	bot.client = telegram.NewClient(appID, appHash, opts)
 	return bot
+}
+
+type businessErrorMiddleware struct{}
+
+func (businessErrorMiddleware) Handle(next tg.Invoker) telegram.InvokeFunc {
+	return func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
+		err := next.Invoke(ctx, input, output)
+		if err != nil {
+			if _, ok := input.(*tg.InvokeWithBusinessConnectionRequest); ok {
+				if strings.Contains(err.Error(), "AUTH_KEY_UNREGISTERED") {
+					return fmt.Errorf("business connection invalid: %w", err)
+				}
+			}
+		}
+		return err
+	}
+}
+
+// Token returns the bot authorization token.
+func (b *BotInstance) Token() string {
+	return b.token
 }
 
 // Start launches the MTProto background client loop and logs in with the bot token.
@@ -166,9 +189,24 @@ func (b *BotInstance) Start(ctx context.Context) error {
 				// Fast path: check if existing session from Redis is already authorized
 				status, statusErr := b.client.Auth().Status(runCtx)
 				if statusErr == nil && status != nil && status.Authorized && status.User != nil {
-					user = status.User
-					b.logger.Debug("Reused existing session authorization", zap.String("username", user.Username))
-				} else {
+					// Verify with Telegram DC that the cached session's auth key is still active
+					users, pingErr := b.raw.UsersGetUsers(runCtx, []tg.InputUserClass{&tg.InputUserSelf{}})
+					if pingErr != nil {
+						b.logger.Warn("Failed to verify cached session with Telegram DC", zap.Error(pingErr))
+						if strings.Contains(pingErr.Error(), "AUTH_KEY_UNREGISTERED") {
+							_ = b.redisStore.DeleteSession(context.Background(), b.token)
+							_ = b.redisStore.DeleteBotProfile(context.Background(), b.token)
+							return fmt.Errorf("cached session auth key unregistered: %w", pingErr)
+						}
+					} else if len(users) > 0 {
+						if u, ok := users[0].AsNotEmpty(); ok {
+							user = u
+							b.logger.Debug("Reused verified session authorization", zap.String("username", user.Username))
+						}
+					}
+				}
+
+				if user == nil {
 					// Authenticate bot using token
 					auth, err := b.client.Auth().Bot(runCtx, b.token)
 					if err != nil {
@@ -233,6 +271,15 @@ func (b *BotInstance) Start(ctx context.Context) error {
 			}
 
 			if firstRun {
+				if runErr != nil && strings.Contains(runErr.Error(), "AUTH_KEY_UNREGISTERED") {
+					b.logger.Warn("Cached session auth key unregistered on startup, purged from Redis; retrying fresh auth...",
+						zap.String("token_prefix", b.token[:min(10, len(b.token))]),
+					)
+					_ = b.redisStore.DeleteSession(context.Background(), b.token)
+					_ = b.redisStore.DeleteBotProfile(context.Background(), b.token)
+					// Do not abort firstRun; reconnect immediately with fresh DH key exchange
+					continue
+				}
 				// Failed on initial connect / auth before ready
 				select {
 				case errChan <- runErr:
@@ -249,6 +296,7 @@ func (b *BotInstance) Start(ctx context.Context) error {
 			if runErr != nil && strings.Contains(runErr.Error(), "AUTH_KEY_UNREGISTERED") {
 				b.logger.Warn("Auth key unregistered for bot, purging session from Redis to force fresh auth", zap.String("token_prefix", b.token[:min(10, len(b.token))]))
 				_ = b.redisStore.DeleteSession(context.Background(), b.token)
+				_ = b.redisStore.DeleteBotProfile(context.Background(), b.token)
 			}
 
 			select {
