@@ -69,6 +69,16 @@ func (s *Server) ListenAndServe() error {
 
 // HandleRequest routes incoming Bot API HTTP requests: /bot<token>/<method> or /file/bot<token>/<file_path>
 func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("PANIC recovered in HandleRequest",
+				zap.Any("panic", r),
+				zap.String("path", redactBotTokenInPath(string(ctx.Path()))),
+			)
+			s.respondError(ctx, 500, "Internal Server Error: panic recovered")
+		}
+	}()
+
 	path := string(ctx.Path())
 
 	// Handle file download: /file/bot<token>/<file_path>
