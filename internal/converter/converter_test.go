@@ -6,6 +6,7 @@ import (
 
 	"telego-bot-api/internal/converter"
 
+	"github.com/gotd/td/bin"
 	"github.com/gotd/td/tg"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -358,6 +359,15 @@ func TestParseInlineKeyboard_ButtonStyles(t *testing.T) {
 	require.True(t, ok3)
 	assert.True(t, style3.BgPrimary)
 	assert.Equal(t, int64(54321), style3.Icon)
+
+	// Test binary serialization/deserialization to ensure MTProto wire format is valid
+	var buf bin.Buffer
+	require.NoError(t, btn0.Encode(&buf))
+	var decoded tg.KeyboardButtonCallback
+	require.NoError(t, decoded.Decode(&buf))
+	decStyle, decOk := decoded.GetStyle()
+	require.True(t, decOk)
+	assert.True(t, decStyle.BgPrimary)
 
 	// Test reverse conversion to Bot API InlineKeyboardMarkup
 	botApiMarkup := converter.ConvertMTProtoReplyMarkup(inlineMarkup)
