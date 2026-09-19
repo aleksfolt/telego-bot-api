@@ -1531,6 +1531,14 @@ func (b *BotInstance) EditMessageMedia(ctx context.Context, req *converter.EditM
 					if msg, err := b.converter.ConvertMessage(msgUpd.Message, entities); err == nil && msg != nil {
 						return msg, nil
 					}
+				} else if bMsgUpd, ok := upd.(*tg.UpdateBotEditBusinessMessage); ok {
+					if msg, err := b.converter.ConvertMessage(bMsgUpd.Message, entities); err == nil && msg != nil {
+						return msg, nil
+					}
+				} else if bMsgUpd, ok := upd.(*tg.UpdateBotNewBusinessMessage); ok {
+					if msg, err := b.converter.ConvertMessage(bMsgUpd.Message, entities); err == nil && msg != nil {
+						return msg, nil
+					}
 				}
 			}
 		case *tg.UpdatesCombined:
@@ -1543,6 +1551,14 @@ func (b *BotInstance) EditMessageMedia(ctx context.Context, req *converter.EditM
 					}
 				} else if msgUpd, ok := upd.(*tg.UpdateNewMessage); ok {
 					if msg, err := b.converter.ConvertMessage(msgUpd.Message, entities); err == nil && msg != nil {
+						return msg, nil
+					}
+				} else if bMsgUpd, ok := upd.(*tg.UpdateBotEditBusinessMessage); ok {
+					if msg, err := b.converter.ConvertMessage(bMsgUpd.Message, entities); err == nil && msg != nil {
+						return msg, nil
+					}
+				} else if bMsgUpd, ok := upd.(*tg.UpdateBotNewBusinessMessage); ok {
+					if msg, err := b.converter.ConvertMessage(bMsgUpd.Message, entities); err == nil && msg != nil {
 						return msg, nil
 					}
 				}
@@ -2002,13 +2018,36 @@ func (b *BotInstance) SendVideo(ctx context.Context, req *converter.SendVideoReq
 
 	msgID := extractSentMessageID(updates)
 
-	if req.Video != "" {
-		if doc := extractDocFromUpdates(updates); doc != nil {
+	var video *converter.Video
+	if doc := extractDocFromUpdates(updates); doc != nil {
+		if req.Video != "" {
 			b.setDocCache(ctx, req.Video, &tg.InputDocument{
 				ID:            doc.ID,
 				AccessHash:    doc.AccessHash,
 				FileReference: doc.FileReference,
 			})
+		}
+		fid := fileid.FromDocument(doc)
+		encoded, _ := fileid.EncodeFileID(fid)
+		video = &converter.Video{
+			FileID:       encoded,
+			FileUniqueID: strconv.FormatInt(doc.ID, 10),
+			Width:        req.Width,
+			Height:       req.Height,
+			Duration:     req.Duration,
+			FileName:     req.VideoFileName,
+			MimeType:     doc.MimeType,
+			FileSize:     doc.Size,
+		}
+	} else if req.Video != "" {
+		video = &converter.Video{
+			FileID:       req.Video,
+			FileUniqueID: "unique_" + req.Video[:min(10, len(req.Video))],
+			Width:        req.Width,
+			Height:       req.Height,
+			Duration:     req.Duration,
+			FileName:     req.VideoFileName,
+			MimeType:     "video/mp4",
 		}
 	}
 
@@ -2018,6 +2057,7 @@ func (b *BotInstance) SendVideo(ctx context.Context, req *converter.SendVideoReq
 		Chat:      converter.Chat{ID: req.ChatID},
 		Date:      int(time.Now().Unix()),
 		Caption:   caption,
+		Video:     video,
 	}, nil
 }
 
@@ -2178,12 +2218,33 @@ func (b *BotInstance) SendDocument(ctx context.Context, req *converter.SendDocum
 
 	msgID := extractSentMessageID(updates)
 
+	var document *converter.Document
+	if doc := extractDocFromUpdates(updates); doc != nil {
+		fid := fileid.FromDocument(doc)
+		encoded, _ := fileid.EncodeFileID(fid)
+		document = &converter.Document{
+			FileID:       encoded,
+			FileUniqueID: strconv.FormatInt(doc.ID, 10),
+			FileName:     req.DocumentFileName,
+			MimeType:     doc.MimeType,
+			FileSize:     doc.Size,
+		}
+	} else if req.Document != "" {
+		document = &converter.Document{
+			FileID:       req.Document,
+			FileUniqueID: "unique_" + req.Document[:min(10, len(req.Document))],
+			FileName:     req.DocumentFileName,
+			MimeType:     "application/octet-stream",
+		}
+	}
+
 	return &converter.Message{
 		MessageID: msgID,
 		From:      b.GetMe(),
 		Chat:      converter.Chat{ID: req.ChatID},
 		Date:      int(time.Now().Unix()),
 		Caption:   caption,
+		Document:  document,
 	}, nil
 }
 
@@ -2473,11 +2534,32 @@ func (b *BotInstance) SendVideoNote(ctx context.Context, req *converter.SendVide
 		return nil, fmt.Errorf("mtproto send video note: %w", err)
 	}
 
+	var videoNote *converter.VideoNote
+	if doc := extractDocFromUpdates(updates); doc != nil {
+		fid := fileid.FromDocument(doc)
+		encoded, _ := fileid.EncodeFileID(fid)
+		videoNote = &converter.VideoNote{
+			FileID:       encoded,
+			FileUniqueID: strconv.FormatInt(doc.ID, 10),
+			Length:       req.Length,
+			Duration:     req.Duration,
+			FileSize:     doc.Size,
+		}
+	} else if req.VideoNote != "" {
+		videoNote = &converter.VideoNote{
+			FileID:       req.VideoNote,
+			FileUniqueID: "unique_" + req.VideoNote[:min(10, len(req.VideoNote))],
+			Length:       req.Length,
+			Duration:     req.Duration,
+		}
+	}
+
 	return &converter.Message{
 		MessageID: extractSentMessageID(updates),
 		From:      b.GetMe(),
 		Chat:      converter.Chat{ID: req.ChatID},
 		Date:      int(time.Now().Unix()),
+		VideoNote: videoNote,
 	}, nil
 }
 
@@ -2975,12 +3057,39 @@ func (b *BotInstance) SendAudio(ctx context.Context, req *converter.SendAudioReq
 		return nil, fmt.Errorf("mtproto send audio: %w", err)
 	}
 
+	var audio *converter.Audio
+	if doc := extractDocFromUpdates(updates); doc != nil {
+		fid := fileid.FromDocument(doc)
+		encoded, _ := fileid.EncodeFileID(fid)
+		audio = &converter.Audio{
+			FileID:       encoded,
+			FileUniqueID: strconv.FormatInt(doc.ID, 10),
+			Duration:     req.Duration,
+			Performer:    req.Performer,
+			Title:        req.Title,
+			FileName:     req.AudioFileName,
+			MimeType:     doc.MimeType,
+			FileSize:     doc.Size,
+		}
+	} else if req.Audio != "" {
+		audio = &converter.Audio{
+			FileID:       req.Audio,
+			FileUniqueID: "unique_" + req.Audio[:min(10, len(req.Audio))],
+			Duration:     req.Duration,
+			Performer:    req.Performer,
+			Title:        req.Title,
+			FileName:     req.AudioFileName,
+			MimeType:     "audio/mpeg",
+		}
+	}
+
 	return &converter.Message{
 		MessageID: extractSentMessageID(updates),
 		From:      b.GetMe(),
 		Chat:      converter.Chat{ID: req.ChatID},
 		Date:      int(time.Now().Unix()),
 		Caption:   caption,
+		Audio:     audio,
 	}, nil
 }
 
@@ -3082,11 +3191,41 @@ func (b *BotInstance) SendSticker(ctx context.Context, req *converter.SendSticke
 		return nil, fmt.Errorf("mtproto send sticker: %w", err)
 	}
 
+	var sticker *converter.Sticker
+	if doc := extractDocFromUpdates(updates); doc != nil {
+		if req.Sticker != "" {
+			b.setDocCache(ctx, req.Sticker, &tg.InputDocument{
+				ID:            doc.ID,
+				AccessHash:    doc.AccessHash,
+				FileReference: doc.FileReference,
+			})
+		}
+		fid := fileid.FromDocument(doc)
+		encoded, _ := fileid.EncodeFileID(fid)
+		sticker = &converter.Sticker{
+			FileID:       encoded,
+			FileUniqueID: strconv.FormatInt(doc.ID, 10),
+			Type:         "regular",
+			Width:        512,
+			Height:       512,
+			FileSize:     int(doc.Size),
+		}
+	} else if req.Sticker != "" {
+		sticker = &converter.Sticker{
+			FileID:       req.Sticker,
+			FileUniqueID: "unique_" + req.Sticker[:min(10, len(req.Sticker))],
+			Type:         "regular",
+			Width:        512,
+			Height:       512,
+		}
+	}
+
 	return &converter.Message{
 		MessageID: extractSentMessageID(updates),
 		From:      b.GetMe(),
 		Chat:      converter.Chat{ID: req.ChatID},
 		Date:      int(time.Now().Unix()),
+		Sticker:   sticker,
 	}, nil
 }
 
@@ -3242,14 +3381,39 @@ func (b *BotInstance) SendAnimation(ctx context.Context, req *converter.SendAnim
 
 	msgID := extractSentMessageID(updates)
 
-	if req.Animation != "" {
-		if doc := extractDocFromUpdates(updates); doc != nil {
+	var animation *converter.Animation
+	if doc := extractDocFromUpdates(updates); doc != nil {
+		if req.Animation != "" {
 			b.setDocCache(ctx, req.Animation, &tg.InputDocument{
 				ID:            doc.ID,
 				AccessHash:    doc.AccessHash,
 				FileReference: doc.FileReference,
 			})
 		}
+		fid := fileid.FromDocument(doc)
+		encoded, _ := fileid.EncodeFileID(fid)
+		anim := converter.Animation{
+			FileID:       encoded,
+			FileUniqueID: strconv.FormatInt(doc.ID, 10),
+			Width:        req.Width,
+			Height:       req.Height,
+			Duration:     req.Duration,
+			FileName:     req.AnimationFileName,
+			MimeType:     doc.MimeType,
+			FileSize:     doc.Size,
+		}
+		animation = &anim
+	} else if req.Animation != "" {
+		anim := converter.Animation{
+			FileID:       req.Animation,
+			FileUniqueID: "unique_" + req.Animation[:min(10, len(req.Animation))],
+			Width:        req.Width,
+			Height:       req.Height,
+			Duration:     req.Duration,
+			FileName:     req.AnimationFileName,
+			MimeType:     "video/mp4",
+		}
+		animation = &anim
 	}
 
 	return &converter.Message{
@@ -3258,6 +3422,7 @@ func (b *BotInstance) SendAnimation(ctx context.Context, req *converter.SendAnim
 		Chat:      converter.Chat{ID: req.ChatID},
 		Date:      int(time.Now().Unix()),
 		Caption:   caption,
+		Animation: animation,
 	}, nil
 }
 
