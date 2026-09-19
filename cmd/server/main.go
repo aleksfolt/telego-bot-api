@@ -100,13 +100,13 @@ func main() {
 		logger.Info("HTTP server stopped gracefully")
 	}
 
-	// 2. Stop webhook dispatcher (flush and terminate workers)
-	dispatcher.Stop()
-	logger.Info("Webhook dispatcher stopped")
-
-	// 3. Close all MTProto bot sessions
+	// 2. Stop bot sessions and webhook replay producers before stopping workers.
 	bm.StopAll()
 	logger.Info("Bot MTProto sessions closed")
+
+	// 3. Finish in-flight HTTP attempts. Pending work remains in Redis for restart.
+	dispatcher.Stop()
+	logger.Info("Webhook dispatcher stopped")
 
 	// 4. Close Redis connection pool
 	if err := rdb.Close(); err != nil {

@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +28,8 @@ type Dispatcher struct {
 
 // Task represents a pending webhook delivery task.
 type Task struct {
+	// Context cancels queued attempts when the webhook changes or the bot stops.
+	Context     context.Context
 	BotID       int64
 	URL         string
 	SecretToken string
@@ -120,6 +123,9 @@ func (d *Dispatcher) worker() {
 }
 
 func (d *Dispatcher) processTask(req *fasthttp.Request, resp *fasthttp.Response, task *Task) {
+	if task.Context != nil && task.Context.Err() != nil {
+		return
+	}
 	if err := d.sendWebhook(req, resp, task); err != nil {
 		d.logger.Error("Failed to deliver webhook",
 			zap.String("url", task.URL),
@@ -146,6 +152,9 @@ func (d *Dispatcher) sendWebhook(req *fasthttp.Request, resp *fasthttp.Response,
 
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
+		if task.Context != nil && task.Context.Err() != nil {
+			return task.Context.Err()
+		}
 		req.Reset()
 		resp.Reset()
 

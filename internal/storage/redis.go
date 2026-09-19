@@ -332,41 +332,73 @@ func (r *RedisStore) ReadUpdates(ctx context.Context, botID int64, offset, limit
 		limit = 100
 	}
 
-	streamKey := updateStreamKey(botID)
-
-	// First, do a non-blocking XRANGE to pick up already-present entries.
-	entries, err := r.client.XRangeN(ctx, streamKey, "-", "+", int64(limit+100)).Result()
-	if err != nil && !errors.Is(err, redis.Nil) {
-		return nil, fmt.Errorf("xrange: %w", err)
+	// Scan pages to locate the requested update_id, without assuming it is
+	// within the first limit+100 entries of the stream.
+	cursor := "0-0"
+	result := make([]UpdateEntry, 0)
+	for {
+		entries, err := r.ReadUpdatesAfter(ctx, botID, cursor, 100, 0)
+		if err != nil {
+			return nil, err
+		}
+		if len(entries) == 0 {
+			break
+		}
+		for _, entry := range entries {
+			cursor = entry.StreamID
+			if offset <= 0 || entry.UpdateID >= offset {
+				result = append(result, entry)
+				if len(result) == limit {
+					return result, nil
+				}
+			}
+		}
 	}
-
-	result := filterEntries(entries, offset, limit)
 	if len(result) > 0 || blockDuration <= 0 {
 		return result, nil
 	}
-
-	// Nothing yet — do a blocking XREAD for new messages.
-	// We use "$" to listen only for messages added after this point, but since we already
-	// read the full stream above and got nothing past offset, this is safe.
-	blockArgs := &redis.XReadArgs{
-		Streams: []string{streamKey, "$"},
-		Count:   int64(limit),
-		Block:   blockDuration,
-	}
-	streams, err := r.client.XRead(ctx, blockArgs).Result()
+	entries, err := r.ReadUpdatesAfter(ctx, botID, cursor, limit, blockDuration)
 	if err != nil {
-		if errors.Is(err, redis.Nil) || strings.Contains(err.Error(), "redis: nil") {
-			return []UpdateEntry{}, nil
+		return nil, err
+	}
+	for _, entry := range entries {
+		if offset <= 0 || entry.UpdateID >= offset {
+			result = append(result, entry)
 		}
-		if ctx.Err() != nil {
-			return []UpdateEntry{}, nil
-		}
-		return nil, fmt.Errorf("xread block: %w", err)
+	}
+	return result, nil
+}
+
+// ReadUpdatesAfter reads after an exact Redis stream cursor. Keeping the cursor
+// for XREAD closes the gap between checking the queue and starting a blocking read.
+func (r *RedisStore) ReadUpdatesAfter(ctx context.Context, botID int64, cursor string, limit int, block time.Duration) ([]UpdateEntry, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	if cursor == "" {
+		cursor = "0-0"
+	}
+	key := updateStreamKey(botID)
+	entries, err := r.client.XRangeN(ctx, key, "("+cursor, "+", int64(limit)).Result()
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return nil, fmt.Errorf("xrange: %w", err)
+	}
+	if len(entries) > 0 || block <= 0 {
+		return filterEntries(entries, 0, limit), nil
+	}
+	streams, err := r.client.XRead(ctx, &redis.XReadArgs{
+		Streams: []string{key, cursor}, Count: int64(limit), Block: block,
+	}).Result()
+	if errors.Is(err, redis.Nil) {
+		return []UpdateEntry{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("xread: %w", err)
 	}
 	if len(streams) == 0 {
 		return []UpdateEntry{}, nil
 	}
-	return filterEntries(streams[0].Messages, offset, limit), nil
+	return filterEntries(streams[0].Messages, 0, limit), nil
 }
 
 // filterEntries converts raw Redis Stream messages to UpdateEntry, keeping only
@@ -425,13 +457,15 @@ func (r *RedisStore) AckUpdates(ctx context.Context, botID int64, offset int) er
 	return r.client.XDel(ctx, streamKey, toDelete...).Err()
 }
 
-// DropPendingUpdates deletes the entire update stream and resets the update_id counter for a bot.
+// AckUpdate removes exactly one delivered stream entry. Webhook delivery may
+// complete out of order, so the polling offset acknowledgement is not suitable.
+func (r *RedisStore) AckUpdate(ctx context.Context, botID int64, streamID string) error {
+	return r.client.XDel(ctx, updateStreamKey(botID), streamID).Err()
+}
+
+// DropPendingUpdates discards the queue while preserving monotonically increasing IDs.
 func (r *RedisStore) DropPendingUpdates(ctx context.Context, botID int64) error {
-	pipe := r.client.Pipeline()
-	pipe.Del(ctx, updateStreamKey(botID))
-	pipe.Del(ctx, updateIDKey(botID))
-	_, err := pipe.Exec(ctx)
-	return err
+	return r.client.Del(ctx, updateStreamKey(botID)).Err()
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -516,4 +550,3 @@ func (r *RedisStore) GetBusinessConnection(ctx context.Context, connectionID str
 	}
 	return val, err
 }
-

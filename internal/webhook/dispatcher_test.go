@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"context"
 	"net"
 	"sync/atomic"
 	"testing"
@@ -96,3 +97,17 @@ func TestDispatcher_QueueOperations(t *testing.T) {
 	require.Equal(t, 1, d.QueueSize())
 }
 
+func TestDispatcherCancelledTaskIsNotSent(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	d := &Dispatcher{logger: zap.NewNop(), client: &fasthttp.Client{
+		Dial: func(string) (net.Conn, error) { t.Fatal("cancelled webhook attempted a connection"); return nil, nil },
+	}}
+	req, resp := fasthttp.AcquireRequest(), fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(resp)
+	d.processTask(req, resp, &Task{
+		Context: ctx, URL: "http://127.0.0.1/unused", Update: &converter.Update{UpdateID: 1},
+		OnSuccess: func(int64, int) { t.Fatal("cancelled update must remain pending") },
+	})
+}
