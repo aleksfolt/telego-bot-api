@@ -411,3 +411,69 @@ func TestParseReplyKeyboard_ButtonStyles(t *testing.T) {
 	assert.True(t, s1.BgSuccess)
 }
 
+func TestConvertUpdate_BusinessMessage_ReplyToSelfDestructPhoto(t *testing.T) {
+	c := converter.NewMTProtoConverter()
+	entities := converter.NewEntityContext([]tg.UserClass{
+		&tg.User{ID: 100, FirstName: "Sender", Username: "sender"},
+		&tg.User{ID: 200, FirstName: "Recipient", Username: "recipient"},
+	}, nil)
+
+	upd := &tg.UpdateBotNewBusinessMessage{
+		ConnectionID: "conn_abc",
+		Message: &tg.Message{
+			ID:      2,
+			Date:    1700000010,
+			Message: "Saving this!",
+			PeerID:  &tg.PeerUser{UserID: 100},
+			FromID:  &tg.PeerUser{UserID: 200},
+			ReplyTo: &tg.MessageReplyHeader{ReplyToMsgID: 1},
+		},
+		ReplyToMessage: &tg.Message{
+			ID:      1,
+			Date:    1700000000,
+			PeerID:  &tg.PeerUser{UserID: 200},
+			FromID:  &tg.PeerUser{UserID: 100},
+			Media: &tg.MessageMediaPhoto{
+				TTLSeconds: 0x7FFFFFFF,
+				Photo: &tg.Photo{
+					ID:         98765,
+					AccessHash: 54321,
+					Sizes: []tg.PhotoSizeClass{
+						&tg.PhotoSize{Type: "m", W: 320, H: 240, Size: 15000},
+						&tg.PhotoSize{Type: "x", W: 800, H: 600, Size: 50000},
+					},
+				},
+			},
+		},
+	}
+
+	converted, err := c.ConvertUpdate(101, upd, entities)
+	require.NoError(t, err)
+	require.NotNil(t, converted)
+	require.NotNil(t, converted.BusinessMessage)
+
+	msg := converted.BusinessMessage
+	assert.Equal(t, int64(2), msg.MessageID)
+	assert.Equal(t, "Saving this!", msg.Text)
+	assert.Equal(t, "conn_abc", msg.BusinessConnectionID)
+
+	// Verify reply_to_message is fully populated with the self-destructing photo
+	require.NotNil(t, msg.ReplyToMessage)
+	reply := msg.ReplyToMessage
+	assert.Equal(t, int64(1), reply.MessageID)
+	assert.True(t, reply.HasProtectedContent)
+	assert.True(t, reply.IsViewOnce)
+	assert.Equal(t, 0x7FFFFFFF, reply.TTLSeconds)
+	require.NotEmpty(t, reply.Photo)
+	assert.Len(t, reply.Photo, 2)
+	assert.NotEmpty(t, reply.Photo[0].FileID)
+
+	// Verify JSON serialization includes reply_to_message with photo and TTL flags
+	data, err := json.Marshal(converted)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"reply_to_message"`)
+	assert.Contains(t, string(data), `"is_view_once":true`)
+	assert.Contains(t, string(data), `"has_protected_content":true`)
+	assert.Contains(t, string(data), `"file_id"`)
+}
+
