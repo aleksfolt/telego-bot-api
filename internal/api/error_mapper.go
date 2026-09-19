@@ -42,6 +42,11 @@ func MapRpcError(err error) (int, string, *converter.ResponseParameters) {
 
 	// 3. Inspect gotd RPC error
 	if rpcErr, ok := tgerr.As(err); ok {
+		// The business middleware wraps this RPC error with context. Unwrapping
+		// it must not turn a failed business connection into an invalid bot token.
+		if rpcErr.Message == "AUTH_KEY_UNREGISTERED" && strings.Contains(strings.ToLower(err.Error()), "business") {
+			return 400, "Bad Request: BUSINESS_CONNECTION_INVALID", nil
+		}
 		return MapErrorString(rpcErr.Message)
 	}
 
