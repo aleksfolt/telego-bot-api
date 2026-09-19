@@ -2316,12 +2316,33 @@ func (b *BotInstance) SendVoice(ctx context.Context, req *converter.SendVoiceReq
 		return nil, fmt.Errorf("mtproto send voice: %w", err)
 	}
 
+	var voice *converter.Voice
+	if doc := extractDocFromUpdates(updates); doc != nil {
+		fid := fileid.FromDocument(doc)
+		encoded, _ := fileid.EncodeFileID(fid)
+		voice = &converter.Voice{
+			FileID:       encoded,
+			FileUniqueID: strconv.FormatInt(doc.ID, 10),
+			Duration:     req.Duration,
+			MimeType:     doc.MimeType,
+			FileSize:     doc.Size,
+		}
+	} else if req.Voice != "" {
+		voice = &converter.Voice{
+			FileID:       req.Voice,
+			FileUniqueID: "unique_" + req.Voice[:min(10, len(req.Voice))],
+			Duration:     req.Duration,
+			MimeType:     "audio/ogg",
+		}
+	}
+
 	return &converter.Message{
 		MessageID: extractSentMessageID(updates),
 		From:      b.GetMe(),
 		Chat:      converter.Chat{ID: req.ChatID},
 		Date:      int(time.Now().Unix()),
 		Caption:   caption,
+		Voice:     voice,
 	}, nil
 }
 
