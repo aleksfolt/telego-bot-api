@@ -922,7 +922,7 @@ func convertServiceMessage(service *tg.MessageService, entities *EntityContext) 
 		message.NewChatTitle = action.Title
 	case *tg.MessageActionChatEditPhoto:
 		if photo, ok := action.Photo.(*tg.Photo); ok {
-			message.NewChatPhoto = photoSizes(photo)
+			message.NewChatPhoto = ConvertPhotoSizes(photo)
 		}
 	case *tg.MessageActionChatDeletePhoto:
 		message.DeleteChatPhoto = true
@@ -950,7 +950,8 @@ func convertServiceMessage(service *tg.MessageService, entities *EntityContext) 
 	return message
 }
 
-func photoSizes(photo *tg.Photo) []PhotoSize {
+// ConvertPhotoSizes converts Telegram photo sizes to reusable Bot API file identifiers.
+func ConvertPhotoSizes(photo *tg.Photo) []PhotoSize {
 	result := make([]PhotoSize, 0, len(photo.Sizes))
 	for _, class := range photo.Sizes {
 		var kind string
@@ -1072,7 +1073,7 @@ func applyMessageMedia(message *Message, class tg.MessageMediaClass) {
 			}
 		}
 		if photo, ok := media.Photo.(*tg.Photo); ok {
-			message.Photo = photoSizes(photo)
+			message.Photo = ConvertPhotoSizes(photo)
 		}
 	case *tg.MessageMediaDocument:
 		message.HasMediaSpoiler = media.Spoiler

@@ -686,8 +686,6 @@ func (b *BotInstance) savePeersToRedis(users []tg.UserClass, chats []tg.ChatClas
 	}()
 }
 
-
-
 // DropPendingUpdates removes all pending updates for this bot from Redis Streams.
 func (b *BotInstance) DropPendingUpdates(ctx context.Context) error {
 	b.mu.RLock()
@@ -1420,9 +1418,10 @@ func (b *BotInstance) EditMessageCaption(ctx context.Context, req *converter.Edi
 	editReq := &tg.MessagesEditMessageRequest{
 		Peer:     peer,
 		ID:       int(req.MessageID),
-		Message:  caption,
 		Entities: entities,
 	}
+
+	editReq.SetMessage(caption)
 
 	if len(req.ReplyMarkup) > 0 {
 		markup, _ := converter.ParseReplyMarkup(req.ReplyMarkup)
@@ -1527,13 +1526,13 @@ func (b *BotInstance) EditMessageMedia(ctx context.Context, req *converter.EditM
 				entities = parsedEntities
 			}
 		}
-		editReq.Message = caption
+		editReq.SetMessage(caption)
 		editReq.Entities = entities
 	} else {
 		var mediaMap map[string]interface{}
 		if err := json.Unmarshal(req.Media, &mediaMap); err == nil {
 			if caption, ok := mediaMap["caption"].(string); ok && caption != "" {
-				editReq.Message = caption
+				editReq.SetMessage(caption)
 			}
 		}
 	}
@@ -1556,51 +1555,14 @@ func (b *BotInstance) EditMessageMedia(ctx context.Context, req *converter.EditM
 		}
 	}
 
-	if updates != nil {
-		switch u := updates.(type) {
-		case *tg.Updates:
-			b.peers.IngestPeers(u.Users, u.Chats)
-			entities := converter.NewEntityContext(u.Users, u.Chats)
-			for _, upd := range u.Updates {
-				if msgUpd, ok := upd.(*tg.UpdateEditMessage); ok {
-					if msg, err := b.converter.ConvertMessage(msgUpd.Message, entities); err == nil && msg != nil {
-						return msg, nil
-					}
-				} else if msgUpd, ok := upd.(*tg.UpdateNewMessage); ok {
-					if msg, err := b.converter.ConvertMessage(msgUpd.Message, entities); err == nil && msg != nil {
-						return msg, nil
-					}
-				} else if bMsgUpd, ok := upd.(*tg.UpdateBotEditBusinessMessage); ok {
-					if msg, err := b.converter.ConvertMessage(bMsgUpd.Message, entities); err == nil && msg != nil {
-						return msg, nil
-					}
-				} else if bMsgUpd, ok := upd.(*tg.UpdateBotNewBusinessMessage); ok {
-					if msg, err := b.converter.ConvertMessage(bMsgUpd.Message, entities); err == nil && msg != nil {
-						return msg, nil
-					}
-				}
-			}
-		case *tg.UpdatesCombined:
-			b.peers.IngestPeers(u.Users, u.Chats)
-			entities := converter.NewEntityContext(u.Users, u.Chats)
-			for _, upd := range u.Updates {
-				if msgUpd, ok := upd.(*tg.UpdateEditMessage); ok {
-					if msg, err := b.converter.ConvertMessage(msgUpd.Message, entities); err == nil && msg != nil {
-						return msg, nil
-					}
-				} else if msgUpd, ok := upd.(*tg.UpdateNewMessage); ok {
-					if msg, err := b.converter.ConvertMessage(msgUpd.Message, entities); err == nil && msg != nil {
-						return msg, nil
-					}
-				} else if bMsgUpd, ok := upd.(*tg.UpdateBotEditBusinessMessage); ok {
-					if msg, err := b.converter.ConvertMessage(bMsgUpd.Message, entities); err == nil && msg != nil {
-						return msg, nil
-					}
-				} else if bMsgUpd, ok := upd.(*tg.UpdateBotNewBusinessMessage); ok {
-					if msg, err := b.converter.ConvertMessage(bMsgUpd.Message, entities); err == nil && msg != nil {
-						return msg, nil
-					}
-				}
+	list, users, chats := unpackUpdates(updates)
+	b.peers.IngestPeers(users, chats)
+	entities := converter.NewEntityContext(users, chats)
+	for _, update := range list {
+		if message := messageFromUpdate(update); message != nil && int64(message.ID) == req.MessageID {
+			if msg, err := b.converter.ConvertMessage(message, entities); err == nil && msg != nil {
+				msg.BusinessConnectionID = req.BusinessConnectionID
+				return msg, nil
 			}
 		}
 	}
@@ -1791,7 +1753,7 @@ func (b *BotInstance) SendPhoto(ctx context.Context, req *converter.SendPhotoReq
 	} else {
 		// Check local file if path exists
 		localPath := strings.TrimPrefix(req.Photo, "file://")
-		if (strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../")) {
+		if strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../") {
 			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
 				data, err := os.ReadFile(localPath)
 				if err == nil && len(data) > 0 {
@@ -1850,6 +1812,7 @@ func (b *BotInstance) SendPhoto(ctx context.Context, req *converter.SendPhotoReq
 		Entities:   entities,
 		RandomID:   randomID.Int64(),
 		Noforwards: req.ProtectContent,
+		Silent:     req.DisableNotification,
 	}
 
 	if len(req.ReplyMarkup) > 0 {
@@ -1876,20 +1839,19 @@ func (b *BotInstance) SendPhoto(ctx context.Context, req *converter.SendPhotoReq
 		}
 	}
 
+	var photos []converter.PhotoSize
+	if photo := extractPhotoFromUpdates(updates); photo != nil {
+		photos = converter.ConvertPhotoSizes(photo)
+	}
 	return &converter.Message{
-		MessageID: msgID,
-		From:      b.GetMe(),
-		Chat:      converter.Chat{ID: req.ChatID},
-		Date:      int(time.Now().Unix()),
-		Caption:   caption,
-		Photo: []converter.PhotoSize{
-			{
-				FileID:       req.Photo,
-				FileUniqueID: "photo",
-				Width:        800,
-				Height:       600,
-			},
-		},
+		MessageID:            msgID,
+		From:                 b.GetMe(),
+		Chat:                 converter.Chat{ID: req.ChatID},
+		Date:                 int(time.Now().Unix()),
+		Caption:              caption,
+		CaptionEntities:      converter.ConvertMTProtoEntities(entities),
+		BusinessConnectionID: req.BusinessConnectionID,
+		Photo:                photos,
 	}, nil
 }
 
@@ -1980,7 +1942,7 @@ func (b *BotInstance) SendVideo(ctx context.Context, req *converter.SendVideoReq
 	} else {
 		// Check local file if path exists
 		localPath := strings.TrimPrefix(req.Video, "file://")
-		if (strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../")) {
+		if strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../") {
 			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
 				data, err := os.ReadFile(localPath)
 				if err == nil && len(data) > 0 {
@@ -2041,6 +2003,7 @@ func (b *BotInstance) SendVideo(ctx context.Context, req *converter.SendVideoReq
 		Entities:   entities,
 		RandomID:   randomID.Int64(),
 		Noforwards: req.ProtectContent,
+		Silent:     req.DisableNotification,
 	}
 
 	if len(req.ReplyMarkup) > 0 {
@@ -2182,7 +2145,7 @@ func (b *BotInstance) SendDocument(ctx context.Context, req *converter.SendDocum
 	} else {
 		// Check local file if path exists
 		localPath := strings.TrimPrefix(req.Document, "file://")
-		if (strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../")) {
+		if strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../") {
 			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
 				data, err := os.ReadFile(localPath)
 				if err == nil && len(data) > 0 {
@@ -2241,6 +2204,7 @@ func (b *BotInstance) SendDocument(ctx context.Context, req *converter.SendDocum
 		Entities:   entities,
 		RandomID:   randomID.Int64(),
 		Noforwards: req.ProtectContent,
+		Silent:     req.DisableNotification,
 	}
 
 	if len(req.ReplyMarkup) > 0 {
@@ -2349,7 +2313,7 @@ func (b *BotInstance) SendVoice(ctx context.Context, req *converter.SendVoiceReq
 		}
 	} else {
 		localPath := strings.TrimPrefix(req.Voice, "file://")
-		if (strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../")) {
+		if strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../") {
 			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
 				data, err := os.ReadFile(localPath)
 				if err == nil && len(data) > 0 {
@@ -2402,6 +2366,7 @@ func (b *BotInstance) SendVoice(ctx context.Context, req *converter.SendVoiceReq
 		Entities:   entities,
 		RandomID:   randomID.Int64(),
 		Noforwards: req.ProtectContent,
+		Silent:     req.DisableNotification,
 	}
 
 	if len(req.ReplyMarkup) > 0 {
@@ -2506,7 +2471,7 @@ func (b *BotInstance) SendVideoNote(ctx context.Context, req *converter.SendVide
 		}
 	} else {
 		localPath := strings.TrimPrefix(req.VideoNote, "file://")
-		if (strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../")) {
+		if strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../") {
 			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
 				data, err := os.ReadFile(localPath)
 				if err == nil && len(data) > 0 {
@@ -2559,6 +2524,7 @@ func (b *BotInstance) SendVideoNote(ctx context.Context, req *converter.SendVide
 		Media:      media,
 		RandomID:   randomID.Int64(),
 		Noforwards: req.ProtectContent,
+		Silent:     req.DisableNotification,
 	}
 
 	if len(req.ReplyMarkup) > 0 {
@@ -2835,55 +2801,18 @@ func describeUpdateSender(upd *converter.Update) string {
 
 func extractSentMessage(updates tg.UpdatesClass) (int64, tg.ReplyMarkupClass) {
 	switch u := updates.(type) {
-	case *tg.Updates:
-		for _, upd := range u.Updates {
-			switch m := upd.(type) {
-			case *tg.UpdateNewMessage:
-				if msg, ok := m.Message.(*tg.Message); ok {
-					return int64(msg.ID), msg.ReplyMarkup
-				}
-			case *tg.UpdateNewChannelMessage:
-				if msg, ok := m.Message.(*tg.Message); ok {
-					return int64(msg.ID), msg.ReplyMarkup
-				}
-			case *tg.UpdateBotNewBusinessMessage:
-				if msg, ok := m.Message.(*tg.Message); ok {
-					return int64(msg.ID), msg.ReplyMarkup
-				}
-			case *tg.UpdateBotEditBusinessMessage:
-				if msg, ok := m.Message.(*tg.Message); ok {
-					return int64(msg.ID), msg.ReplyMarkup
-				}
-			case *tg.UpdateMessageID:
-				return int64(m.ID), nil
-			}
-		}
 	case *tg.UpdateShortSentMessage:
 		return int64(u.ID), nil
 	case *tg.UpdateShortMessage:
 		return int64(u.ID), nil
-	case *tg.UpdatesCombined:
-		for _, upd := range u.Updates {
-			switch m := upd.(type) {
-			case *tg.UpdateNewMessage:
-				if msg, ok := m.Message.(*tg.Message); ok {
-					return int64(msg.ID), msg.ReplyMarkup
-				}
-			case *tg.UpdateNewChannelMessage:
-				if msg, ok := m.Message.(*tg.Message); ok {
-					return int64(msg.ID), msg.ReplyMarkup
-				}
-			case *tg.UpdateBotNewBusinessMessage:
-				if msg, ok := m.Message.(*tg.Message); ok {
-					return int64(msg.ID), msg.ReplyMarkup
-				}
-			case *tg.UpdateBotEditBusinessMessage:
-				if msg, ok := m.Message.(*tg.Message); ok {
-					return int64(msg.ID), msg.ReplyMarkup
-				}
-			case *tg.UpdateMessageID:
-				return int64(m.ID), nil
-			}
+	}
+	list, _, _ := unpackUpdates(updates)
+	for _, update := range list {
+		if msg := messageFromUpdate(update); msg != nil {
+			return int64(msg.ID), msg.ReplyMarkup
+		}
+		if mapping, ok := update.(*tg.UpdateMessageID); ok {
+			return int64(mapping.ID), nil
 		}
 	}
 	return 0, nil
@@ -2894,57 +2823,12 @@ func extractSentMessageID(updates tg.UpdatesClass) int64 {
 	return id
 }
 
-func extractPhotoFromUpdates(updates tg.UpdatesClass) *tg.Photo {
-	if u, ok := updates.(*tg.Updates); ok {
-		for _, upd := range u.Updates {
-			var msg *tg.Message
-			switch m := upd.(type) {
-			case *tg.UpdateNewMessage:
-				msg, _ = m.Message.(*tg.Message)
-			case *tg.UpdateBotNewBusinessMessage:
-				msg, _ = m.Message.(*tg.Message)
-			}
-			if msg != nil {
-				if pMedia, ok := msg.Media.(*tg.MessageMediaPhoto); ok {
-					if photo, ok := pMedia.Photo.(*tg.Photo); ok {
-						return photo
-					}
-				}
-			}
-		}
-	}
-	return nil
-}
-
-func extractDocFromUpdates(updates tg.UpdatesClass) *tg.Document {
-	if u, ok := updates.(*tg.Updates); ok {
-		for _, upd := range u.Updates {
-			var msg *tg.Message
-			switch m := upd.(type) {
-			case *tg.UpdateNewMessage:
-				msg, _ = m.Message.(*tg.Message)
-			case *tg.UpdateBotNewBusinessMessage:
-				msg, _ = m.Message.(*tg.Message)
-			}
-			if msg != nil {
-				if dMedia, ok := msg.Media.(*tg.MessageMediaDocument); ok {
-					if doc, ok := dMedia.Document.(*tg.Document); ok {
-						return doc
-					}
-				}
-			}
-		}
-	}
-	return nil
-}
-
 func min(a, b int) int {
 	if a < b {
 		return a
 	}
 	return b
 }
-
 
 // SendAudio sends an audio file.
 func (b *BotInstance) SendAudio(ctx context.Context, req *converter.SendAudioRequest) (*converter.Message, error) {
@@ -3027,7 +2911,7 @@ func (b *BotInstance) SendAudio(ctx context.Context, req *converter.SendAudioReq
 	} else {
 		// Check local file if path exists
 		localPath := strings.TrimPrefix(req.Audio, "file://")
-		if (strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../")) {
+		if strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../") {
 			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
 				data, err := os.ReadFile(localPath)
 				if err == nil && len(data) > 0 {
@@ -3082,6 +2966,7 @@ func (b *BotInstance) SendAudio(ctx context.Context, req *converter.SendAudioReq
 		Entities:   entities,
 		RandomID:   randomID.Int64(),
 		Noforwards: req.ProtectContent,
+		Silent:     req.DisableNotification,
 	}
 
 	if len(req.ReplyMarkup) > 0 {
@@ -3171,7 +3056,7 @@ func (b *BotInstance) SendSticker(ctx context.Context, req *converter.SendSticke
 	} else {
 		// Check local file if path exists
 		localPath := strings.TrimPrefix(req.Sticker, "file://")
-		if (strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../")) {
+		if strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../") {
 			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
 				data, err := os.ReadFile(localPath)
 				if err == nil && len(data) > 0 {
@@ -3216,6 +3101,7 @@ func (b *BotInstance) SendSticker(ctx context.Context, req *converter.SendSticke
 		Media:      media,
 		RandomID:   randomID.Int64(),
 		Noforwards: req.ProtectContent,
+		Silent:     req.DisableNotification,
 	}
 
 	if len(req.ReplyMarkup) > 0 {
@@ -3348,7 +3234,7 @@ func (b *BotInstance) SendAnimation(ctx context.Context, req *converter.SendAnim
 	} else {
 		// Check local file if path exists
 		localPath := strings.TrimPrefix(req.Animation, "file://")
-		if (strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../")) {
+		if strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../") {
 			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
 				data, err := os.ReadFile(localPath)
 				if err == nil && len(data) > 0 {
@@ -3404,6 +3290,7 @@ func (b *BotInstance) SendAnimation(ctx context.Context, req *converter.SendAnim
 		Entities:   entities,
 		RandomID:   randomID.Int64(),
 		Noforwards: req.ProtectContent,
+		Silent:     req.DisableNotification,
 	}
 
 	if len(req.ReplyMarkup) > 0 {
@@ -3642,7 +3529,7 @@ func (b *BotInstance) resolveInputSingleMedia(ctx context.Context, peer tg.Input
 		}
 
 		localPath := strings.TrimPrefix(item.Media, "file://")
-		if (strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../")) {
+		if strings.HasPrefix(localPath, "/") || strings.HasPrefix(localPath, "./") || strings.HasPrefix(localPath, "../") {
 			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
 				if fileData, err := os.ReadFile(localPath); err == nil && len(fileData) > 0 {
 					if files == nil {
@@ -3981,6 +3868,7 @@ func (b *BotInstance) SendMediaGroup(ctx context.Context, req *converter.SendMed
 		MultiMedia: multiMedia,
 		Noforwards: req.ProtectContent,
 		Silent:     req.DisableNotification,
+		ReplyTo:    createReplyTo(req.ReplyParameters, 0, req.MessageThreadID),
 	}
 
 	var updates tg.UpdatesClass
@@ -4003,24 +3891,26 @@ func (b *BotInstance) SendMediaGroup(ctx context.Context, req *converter.SendMed
 
 	var messages []*converter.Message
 	now := int(time.Now().Unix())
-	switch u := updates.(type) {
-	case *tg.Updates:
-		for _, upd := range u.Updates {
-			var msg *tg.Message
-			switch m := upd.(type) {
-			case *tg.UpdateNewMessage:
-				msg, _ = m.Message.(*tg.Message)
-			case *tg.UpdateBotNewBusinessMessage:
-				msg, _ = m.Message.(*tg.Message)
+	list, users, chats := unpackUpdates(updates)
+	b.peers.IngestPeers(users, chats)
+	entities := converter.NewEntityContext(users, chats)
+	for _, update := range list {
+		// Only newly sent messages belong in an album result.
+		switch update.(type) {
+		case *tg.UpdateNewMessage, *tg.UpdateNewChannelMessage, *tg.UpdateBotNewBusinessMessage:
+		default:
+			continue
+		}
+		if message := messageFromUpdate(update); message != nil {
+			msg, err := b.converter.ConvertMessage(message, entities)
+			if err != nil || msg == nil {
+				msg = &converter.Message{
+					MessageID: int64(message.ID), From: b.GetMe(),
+					Chat: converter.Chat{ID: req.ChatID}, Date: now,
+				}
 			}
-			if msg != nil {
-				messages = append(messages, &converter.Message{
-					MessageID: int64(msg.ID),
-					From:      b.GetMe(),
-					Chat:      converter.Chat{ID: req.ChatID},
-					Date:      now,
-				})
-			}
+			msg.BusinessConnectionID = req.BusinessConnectionID
+			messages = append(messages, msg)
 		}
 	}
 
