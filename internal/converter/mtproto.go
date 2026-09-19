@@ -348,6 +348,11 @@ func (c *MTProtoConverter) ConvertUpdate(updateID int, u tg.UpdateClass, entitie
 			return nil, nil
 		}
 		msg.BusinessConnectionID = upd.ConnectionID
+		if upd.ReplyToMessage != nil {
+			if replyMsg, err := c.ConvertMessage(upd.ReplyToMessage, entities); err == nil && replyMsg != nil {
+				msg.ReplyToMessage = replyMsg
+			}
+		}
 		return &Update{
 			UpdateID:        updateID,
 			BusinessMessage: msg,
@@ -362,6 +367,11 @@ func (c *MTProtoConverter) ConvertUpdate(updateID int, u tg.UpdateClass, entitie
 			return nil, nil
 		}
 		msg.BusinessConnectionID = upd.ConnectionID
+		if upd.ReplyToMessage != nil {
+			if replyMsg, err := c.ConvertMessage(upd.ReplyToMessage, entities); err == nil && replyMsg != nil {
+				msg.ReplyToMessage = replyMsg
+			}
+		}
 		return &Update{
 			UpdateID:              updateID,
 			EditedBusinessMessage: msg,
@@ -1054,11 +1064,25 @@ func applyMessageMedia(message *Message, class tg.MessageMediaClass) {
 	switch media := class.(type) {
 	case *tg.MessageMediaPhoto:
 		message.HasMediaSpoiler = media.Spoiler
+		if media.TTLSeconds > 0 {
+			message.TTLSeconds = media.TTLSeconds
+			message.HasProtectedContent = true
+			if media.TTLSeconds == 0x7FFFFFFF {
+				message.IsViewOnce = true
+			}
+		}
 		if photo, ok := media.Photo.(*tg.Photo); ok {
 			message.Photo = photoSizes(photo)
 		}
 	case *tg.MessageMediaDocument:
 		message.HasMediaSpoiler = media.Spoiler
+		if media.TTLSeconds > 0 {
+			message.TTLSeconds = media.TTLSeconds
+			message.HasProtectedContent = true
+			if media.TTLSeconds == 0x7FFFFFFF {
+				message.IsViewOnce = true
+			}
+		}
 		if document, ok := media.Document.(*tg.Document); ok {
 			applyDocumentMedia(message, document, media)
 		}

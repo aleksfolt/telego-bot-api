@@ -182,6 +182,8 @@ type Message struct {
 	HasProtectedContent           bool                           `json:"has_protected_content,omitempty"`
 	ShowCaptionAboveMedia         bool                           `json:"show_caption_above_media,omitempty"`
 	HasMediaSpoiler               bool                           `json:"has_media_spoiler,omitempty"`
+	TTLSeconds                    int                            `json:"ttl_seconds,omitempty"`
+	IsViewOnce                    bool                           `json:"is_view_once,omitempty"`
 	ViaBot                        *User                          `json:"via_bot,omitempty"`
 	NewChatMembers                []User                         `json:"new_chat_members,omitempty"`
 	LeftChatMember                *User                          `json:"left_chat_member,omitempty"`
