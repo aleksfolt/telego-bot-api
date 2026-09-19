@@ -535,7 +535,7 @@ func (b *BotInstance) sendMediaMessage(ctx context.Context, peer tg.InputPeerCla
 	}
 	if connectionID != "" {
 		var box tg.UpdatesBox
-		if err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{ConnectionID: connectionID, Query: request}, &box); err != nil {
+		if err := b.invokeBusiness(ctx, connectionID, request, &box); err != nil {
 			return nil, err
 		}
 		return box.Updates, nil
@@ -573,7 +573,7 @@ func (b *BotInstance) editMessageMedia(ctx context.Context, connectionID string,
 	}
 	if connectionID != "" {
 		var box tg.UpdatesBox
-		return b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{ConnectionID: connectionID, Query: request}, &box)
+		return b.invokeBusiness(ctx, connectionID, request, &box)
 	}
 	_, err = b.raw.MessagesEditMessage(ctx, request)
 	return err
@@ -1151,7 +1151,7 @@ func (b *BotInstance) StopPoll(ctx context.Context, req *converter.StopPollReque
 	}
 	if req.BusinessConnectionID != "" {
 		var box tg.UpdatesBox
-		err = b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{ConnectionID: req.BusinessConnectionID, Query: edit}, &box)
+		err = b.invokeBusiness(ctx, req.BusinessConnectionID, edit, &box)
 	} else {
 		_, err = b.raw.MessagesEditMessage(ctx, edit)
 	}
@@ -1200,10 +1200,7 @@ func (b *BotInstance) PinChatMessage(ctx context.Context, req *converter.PinChat
 
 	if req.BusinessConnectionID != "" {
 		var res tg.UpdatesBox
-		err = b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-			ConnectionID: req.BusinessConnectionID,
-			Query:        pinReq,
-		}, &res)
+		err = b.invokeBusiness(ctx, req.BusinessConnectionID, pinReq, &res)
 	} else {
 		_, err = b.raw.MessagesUpdatePinnedMessage(ctx, pinReq)
 	}
@@ -1225,10 +1222,7 @@ func (b *BotInstance) UnpinChatMessage(ctx context.Context, req *converter.Unpin
 
 	if req.BusinessConnectionID != "" {
 		var res tg.UpdatesBox
-		err = b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-			ConnectionID: req.BusinessConnectionID,
-			Query:        unpinReq,
-		}, &res)
+		err = b.invokeBusiness(ctx, req.BusinessConnectionID, unpinReq, &res)
 	} else {
 		_, err = b.raw.MessagesUpdatePinnedMessage(ctx, unpinReq)
 	}
@@ -2385,7 +2379,7 @@ func (b *BotInstance) SendPaidMedia(ctx context.Context, req *converter.SendPaid
 	var updates tg.UpdatesClass
 	if req.BusinessConnectionID != "" {
 		var box tg.UpdatesBox
-		err = b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{ConnectionID: req.BusinessConnectionID, Query: send}, &box)
+		err = b.invokeBusiness(ctx, req.BusinessConnectionID, send, &box)
 		updates = box.Updates
 	} else {
 		updates, err = b.raw.MessagesSendMedia(ctx, send)
@@ -3217,10 +3211,7 @@ func (b *BotInstance) ConvertGiftToStars(ctx context.Context, req *converter.Con
 	}
 	if req.BusinessConnectionID != "" {
 		var res tg.BoolBox
-		err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-			ConnectionID: req.BusinessConnectionID,
-			Query:        &tg.PaymentsConvertStarGiftRequest{Stargift: giftInput},
-		}, &res)
+		err := b.invokeBusiness(ctx, req.BusinessConnectionID, &tg.PaymentsConvertStarGiftRequest{Stargift: giftInput}, &res)
 		return err == nil, err
 	}
 	res, err := b.raw.PaymentsConvertStarGift(ctx, giftInput)
@@ -3240,10 +3231,7 @@ func (b *BotInstance) UpgradeGift(ctx context.Context, req *converter.UpgradeGif
 	}
 	if req.BusinessConnectionID != "" {
 		var updates tg.UpdatesBox
-		_ = b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-			ConnectionID: req.BusinessConnectionID,
-			Query:        upgradeReq,
-		}, &updates)
+		_ = b.invokeBusiness(ctx, req.BusinessConnectionID, upgradeReq, &updates)
 	} else {
 		_, _ = b.raw.PaymentsUpgradeStarGift(ctx, upgradeReq)
 	}
@@ -3267,10 +3255,7 @@ func (b *BotInstance) TransferGift(ctx context.Context, req *converter.TransferG
 	}
 	if req.BusinessConnectionID != "" {
 		var updates tg.UpdatesBox
-		if err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-			ConnectionID: req.BusinessConnectionID,
-			Query:        transferReq,
-		}, &updates); err != nil {
+		if err := b.invokeBusiness(ctx, req.BusinessConnectionID, transferReq, &updates); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -3290,16 +3275,16 @@ func (b *BotInstance) GetChatGifts(ctx context.Context, req *converter.GetChatGi
 		limit = 100
 	}
 	res, err := b.raw.PaymentsGetSavedStarGifts(ctx, &tg.PaymentsGetSavedStarGiftsRequest{
-		Peer:               peer,
-		ExcludeUnsaved:     req.ExcludeUnsaved,
-		ExcludeSaved:       req.ExcludeSaved,
-		ExcludeUnlimited:   req.ExcludeUnlimited,
-		ExcludeUnique:      req.ExcludeUnique,
-		ExcludeUpgradable:  req.ExcludeLimitedUpgradable,
+		Peer:                peer,
+		ExcludeUnsaved:      req.ExcludeUnsaved,
+		ExcludeSaved:        req.ExcludeSaved,
+		ExcludeUnlimited:    req.ExcludeUnlimited,
+		ExcludeUnique:       req.ExcludeUnique,
+		ExcludeUpgradable:   req.ExcludeLimitedUpgradable,
 		ExcludeUnupgradable: req.ExcludeLimitedNonUpgradable,
-		SortByValue:        req.SortByPrice,
-		Offset:             req.Offset,
-		Limit:              limit,
+		SortByValue:         req.SortByPrice,
+		Offset:              req.Offset,
+		Limit:               limit,
 	})
 	if err != nil {
 		return &converter.UserGifts{TotalCount: 0, Gifts: []converter.OwnedGift{}}, nil
@@ -3318,14 +3303,14 @@ func (b *BotInstance) GetUserGifts(ctx context.Context, req *converter.GetUserGi
 		limit = 100
 	}
 	res, err := b.raw.PaymentsGetSavedStarGifts(ctx, &tg.PaymentsGetSavedStarGiftsRequest{
-		Peer:               peer,
-		ExcludeUnlimited:   req.ExcludeUnlimited,
-		ExcludeUnique:      req.ExcludeUnique,
-		ExcludeUpgradable:  req.ExcludeLimitedUpgradable,
+		Peer:                peer,
+		ExcludeUnlimited:    req.ExcludeUnlimited,
+		ExcludeUnique:       req.ExcludeUnique,
+		ExcludeUpgradable:   req.ExcludeLimitedUpgradable,
 		ExcludeUnupgradable: req.ExcludeLimitedNonUpgradable,
-		SortByValue:        req.SortByPrice,
-		Offset:             req.Offset,
-		Limit:              limit,
+		SortByValue:         req.SortByPrice,
+		Offset:              req.Offset,
+		Limit:               limit,
 	})
 	if err != nil {
 		return &converter.UserGifts{TotalCount: 0, Gifts: []converter.OwnedGift{}}, nil
@@ -3348,20 +3333,17 @@ func (b *BotInstance) GetBusinessAccountGifts(ctx context.Context, req *converte
 		limit = 100
 	}
 	var res tg.PaymentsSavedStarGifts
-	err = b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-		ConnectionID: req.BusinessConnectionID,
-		Query: &tg.PaymentsGetSavedStarGiftsRequest{
-			Peer:               peer,
-			ExcludeUnsaved:     req.ExcludeUnsaved,
-			ExcludeSaved:       req.ExcludeSaved,
-			ExcludeUnlimited:   req.ExcludeUnlimited,
-			ExcludeUnique:      req.ExcludeUnique,
-			ExcludeUpgradable:  req.ExcludeLimitedUpgradable,
-			ExcludeUnupgradable: req.ExcludeLimitedNonUpgradable,
-			SortByValue:        req.SortByPrice,
-			Offset:             req.Offset,
-			Limit:              limit,
-		},
+	err = b.invokeBusiness(ctx, req.BusinessConnectionID, &tg.PaymentsGetSavedStarGiftsRequest{
+		Peer:                peer,
+		ExcludeUnsaved:      req.ExcludeUnsaved,
+		ExcludeSaved:        req.ExcludeSaved,
+		ExcludeUnlimited:    req.ExcludeUnlimited,
+		ExcludeUnique:       req.ExcludeUnique,
+		ExcludeUpgradable:   req.ExcludeLimitedUpgradable,
+		ExcludeUnupgradable: req.ExcludeLimitedNonUpgradable,
+		SortByValue:         req.SortByPrice,
+		Offset:              req.Offset,
+		Limit:               limit,
 	}, &res)
 	if err != nil {
 		return &converter.UserGifts{TotalCount: 0, Gifts: []converter.OwnedGift{}}, nil
@@ -3372,10 +3354,7 @@ func (b *BotInstance) GetBusinessAccountGifts(ctx context.Context, req *converte
 // GetBusinessAccountStarBalance returns the Star balance of a connected business account.
 func (b *BotInstance) GetBusinessAccountStarBalance(ctx context.Context, businessConnectionID string) (*converter.StarAmount, error) {
 	var res tg.PaymentsStarsStatus
-	err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-		ConnectionID: businessConnectionID,
-		Query:        &tg.PaymentsGetStarsStatusRequest{Peer: &tg.InputPeerSelf{}},
-	}, &res)
+	err := b.invokeBusiness(ctx, businessConnectionID, &tg.PaymentsGetStarsStatusRequest{Peer: &tg.InputPeerSelf{}}, &res)
 	if err != nil {
 		return &converter.StarAmount{Amount: 0, NanostarAmount: 0}, nil
 	}
@@ -3493,14 +3472,22 @@ func (b *BotInstance) EditUserStarSubscription(ctx context.Context, req *convert
 
 // RepostStory reposts a story on behalf of a business account or bot.
 func (b *BotInstance) RepostStory(ctx context.Context, req *converter.RepostStoryRequest) (interface{}, error) {
-	peer, err := b.resolvePeer(req.FromChatID)
+	connection, _, err := b.businessConnection(ctx, req.BusinessConnectionID, true)
+	if err != nil {
+		return nil, err
+	}
+	peer, err := b.resolvePeer(connection.UserChatID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve business peer: %w", err)
+	}
+	fromPeer, err := b.resolvePeer(req.FromChatID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve from_chat_id: %w", err)
 	}
 	randomID, _ := rand.Int(rand.Reader, big.NewInt(1<<62))
 	request := &tg.StoriesSendStoryRequest{
 		Peer:         peer,
-		Media:        &tg.InputMediaStory{Peer: peer, ID: req.StoryID},
+		Media:        &tg.InputMediaStory{Peer: fromPeer, ID: req.StoryID},
 		PrivacyRules: []tg.InputPrivacyRuleClass{&tg.InputPrivacyValueAllowAll{}},
 		RandomID:     randomID.Int64(),
 		Pinned:       req.PostToChatPage,
@@ -3509,20 +3496,11 @@ func (b *BotInstance) RepostStory(ctx context.Context, req *converter.RepostStor
 	if req.ActivePeriod != 0 {
 		request.SetPeriod(req.ActivePeriod)
 	}
-	if req.BusinessConnectionID != "" {
-		var box tg.UpdatesBox
-		if err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-			ConnectionID: req.BusinessConnectionID,
-			Query:        request,
-		}, &box); err != nil {
-			return nil, err
-		}
-	} else {
-		if _, err := b.raw.StoriesSendStory(ctx, request); err != nil {
-			return nil, err
-		}
+	var box tg.UpdatesBox
+	if err := b.invokeBusinessDirect(ctx, req.BusinessConnectionID, request, &box); err != nil {
+		return nil, err
 	}
-	return map[string]interface{}{"id": req.StoryID, "chat": converter.Chat{ID: req.FromChatID}, "date": int(time.Now().Unix())}, nil
+	return map[string]interface{}{"id": req.StoryID, "chat": converter.Chat{ID: connection.UserChatID}, "date": int(time.Now().Unix())}, nil
 }
 
 // EditStory edits a story previously posted through a business connection.
@@ -3547,10 +3525,7 @@ func (b *BotInstance) EditStory(ctx context.Context, req *converter.EditStoryReq
 		}
 	}
 	var box tg.UpdatesBox
-	if err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-		ConnectionID: req.BusinessConnectionID,
-		Query:        request,
-	}, &box); err != nil {
+	if err := b.invokeBusinessDirect(ctx, req.BusinessConnectionID, request, &box); err != nil {
 		return nil, err
 	}
 	return map[string]interface{}{"id": req.StoryID, "chat": converter.Chat{ID: connection.UserChatID}, "date": int(time.Now().Unix())}, nil
@@ -3669,5 +3644,3 @@ func (b *BotInstance) EditEphemeralMessageReplyMarkup(ctx context.Context, req *
 func (b *BotInstance) DeleteEphemeralMessage(ctx context.Context, req *converter.DeleteEphemeralMessageRequest) (bool, error) {
 	return true, nil
 }
-
-

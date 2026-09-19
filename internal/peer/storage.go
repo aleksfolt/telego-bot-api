@@ -9,10 +9,10 @@ import (
 
 // Storage stores chat_id -> access_hash mappings for fast in-memory peer resolution.
 type Storage struct {
-	mu           sync.RWMutex
-	userHashes   map[int64]int64 // user_id -> access_hash
-	chanHashes   map[int64]int64 // channel_id -> access_hash
-	chatExists   map[int64]bool  // basic_chat_id -> exists
+	mu         sync.RWMutex
+	userHashes map[int64]int64 // user_id -> access_hash
+	chanHashes map[int64]int64 // channel_id -> access_hash
+	chatExists map[int64]bool  // basic_chat_id -> exists
 }
 
 // NewStorage creates a new in-memory peer storage.
@@ -107,11 +107,7 @@ func (s *Storage) ResolvePeer(chatID int64) (tg.InputPeerClass, error) {
 	// 3. Private User Chat: ID is positive
 	hash, ok := s.userHashes[chatID]
 	if !ok {
-		// Sometimes access_hash is 0 for bots communicating with users who initiated the chat
-		return &tg.InputPeerUser{
-			UserID:     chatID,
-			AccessHash: hash,
-		}, nil
+		return nil, fmt.Errorf("user %d not found in peer cache; access_hash missing", chatID)
 	}
 
 	return &tg.InputPeerUser{

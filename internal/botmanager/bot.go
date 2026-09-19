@@ -64,6 +64,11 @@ type BotInstance struct {
 
 	busConnsMu sync.RWMutex
 	busConns   map[string]*converter.BusinessConnection
+	busConnDCs map[string]int
+
+	businessDCMu      sync.Mutex
+	businessDCPools   map[int]telegram.CloseInvoker
+	businessDCFactory func(context.Context, int) (telegram.CloseInvoker, error)
 
 	mediaCacheMu sync.RWMutex
 	mediaCache   map[string]*tg.InputPhoto
@@ -96,20 +101,22 @@ func NewBotInstance(
 	}
 
 	bot := &BotInstance{
-		token:        token,
-		appID:        appID,
-		appHash:      appHash,
-		peers:        peer.NewStorage(),
-		converter:    converter.NewMTProtoConverter(),
-		dispatcher:   dispatcher,
-		redisStore:   redisStore,
-		logger:       logger.With(zap.String("token_prefix", token[:min(10, len(token))])),
-		botID:        botID,
-		updateNotify: make(chan struct{}, 1),
-		busConns:     make(map[string]*converter.BusinessConnection),
-		mediaCache:   make(map[string]*tg.InputPhoto),
-		docCache:     make(map[string]*tg.InputDocument),
-		ready:        make(chan struct{}),
+		token:           token,
+		appID:           appID,
+		appHash:         appHash,
+		peers:           peer.NewStorage(),
+		converter:       converter.NewMTProtoConverter(),
+		dispatcher:      dispatcher,
+		redisStore:      redisStore,
+		logger:          logger.With(zap.String("token_prefix", token[:min(10, len(token))])),
+		botID:           botID,
+		updateNotify:    make(chan struct{}, 1),
+		busConns:        make(map[string]*converter.BusinessConnection),
+		busConnDCs:      make(map[string]int),
+		businessDCPools: make(map[int]telegram.CloseInvoker),
+		mediaCache:      make(map[string]*tg.InputPhoto),
+		docCache:        make(map[string]*tg.InputDocument),
+		ready:           make(chan struct{}),
 	}
 	bot.lastActive.Store(time.Now().UnixNano())
 
@@ -137,6 +144,9 @@ func NewBotInstance(
 	}
 
 	bot.client = telegram.NewClient(appID, appHash, opts)
+	bot.businessDCFactory = func(ctx context.Context, dcID int) (telegram.CloseInvoker, error) {
+		return bot.client.DC(ctx, dcID, 2)
+	}
 	return bot
 }
 
@@ -439,14 +449,11 @@ func (b *BotInstance) Handle(ctx context.Context, u tg.UpdatesClass) error {
 		}
 		if converted != nil {
 			if converted.BusinessConnection != nil {
-				b.busConnsMu.Lock()
-				b.busConns[converted.BusinessConnection.ID] = converted.BusinessConnection
-				b.busConnsMu.Unlock()
-				if b.redisStore != nil {
-					if data, err := json.Marshal(converted.BusinessConnection); err == nil {
-						_ = b.redisStore.SaveBusinessConnection(context.Background(), converted.BusinessConnection.ID, data)
-					}
+				dcID := 0
+				if update, ok := rawUpd.(*tg.UpdateBotBusinessConnect); ok {
+					dcID = update.Connection.DCID
 				}
+				b.cacheBusinessConnection(context.Background(), converted.BusinessConnection, dcID)
 			}
 			extraUpdates = append(extraUpdates, converted)
 		}
@@ -661,6 +668,9 @@ func updateAllowed(update *converter.Update, allowed []string) bool {
 }
 
 func (b *BotInstance) savePeersToRedis(users []tg.UserClass, chats []tg.ChatClass) {
+	if b.redisStore == nil {
+		return
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -812,7 +822,9 @@ func (b *BotInstance) Hibernate() {
 
 	b.busConnsMu.Lock()
 	b.busConns = make(map[string]*converter.BusinessConnection)
+	b.busConnDCs = make(map[string]int)
 	b.busConnsMu.Unlock()
+	b.closeBusinessInvokers()
 
 	b.peers.Reset()
 
@@ -898,99 +910,6 @@ func (b *BotInstance) GetOrRefreshMe(ctx context.Context) *converter.User {
 	return b.GetMe()
 }
 
-// GetBusinessConnection retrieves a business connection by its ID.
-func (b *BotInstance) GetBusinessConnection(ctx context.Context, connectionID string) (*converter.BusinessConnection, error) {
-	// 1. Check in-memory cache
-	b.busConnsMu.RLock()
-	cached, ok := b.busConns[connectionID]
-	b.busConnsMu.RUnlock()
-	if ok && cached != nil {
-		return cached, nil
-	}
-
-	// 2. Check Redis cache
-	if b.redisStore != nil {
-		if data, err := b.redisStore.GetBusinessConnection(ctx, connectionID); err == nil && len(data) > 0 {
-			var conn converter.BusinessConnection
-			if err := json.Unmarshal(data, &conn); err == nil {
-				b.busConnsMu.Lock()
-				b.busConns[connectionID] = &conn
-				b.busConnsMu.Unlock()
-				return &conn, nil
-			}
-		}
-	}
-
-	// 3. Query MTProto
-	if b.raw != nil {
-		updates, err := b.raw.AccountGetBotBusinessConnection(ctx, connectionID)
-		if err == nil {
-			var conn *tg.BotBusinessConnection
-			var users []tg.UserClass
-
-			switch u := updates.(type) {
-			case *tg.Updates:
-				users = u.Users
-				for _, upd := range u.Updates {
-					if bbc, ok := upd.(*tg.UpdateBotBusinessConnect); ok {
-						conn = &bbc.Connection
-						break
-					}
-				}
-			case *tg.UpdatesCombined:
-				users = u.Users
-				for _, upd := range u.Updates {
-					if bbc, ok := upd.(*tg.UpdateBotBusinessConnect); ok {
-						conn = &bbc.Connection
-						break
-					}
-				}
-			}
-
-			if conn != nil {
-				var user converter.User
-				if len(users) > 0 {
-					entCtx := converter.NewEntityContext(users, nil)
-					if u := entCtx.GetUser(conn.UserID); u != nil {
-						user = *u
-					}
-				}
-				if user.ID == 0 {
-					user = converter.User{
-						ID:        conn.UserID,
-						IsBot:     false,
-						FirstName: "User",
-					}
-				}
-
-				res := &converter.BusinessConnection{
-					ID:         conn.ConnectionID,
-					User:       user,
-					UserChatID: conn.UserID,
-					Date:       conn.Date,
-					CanReply:   conn.Rights.Reply,
-					IsEnabled:  !conn.Disabled,
-					Rights:     converter.ConvertBusinessBotRights(conn.Rights),
-				}
-
-				b.busConnsMu.Lock()
-				b.busConns[connectionID] = res
-				b.busConnsMu.Unlock()
-
-				if b.redisStore != nil {
-					if data, err := json.Marshal(res); err == nil {
-						_ = b.redisStore.SaveBusinessConnection(context.Background(), connectionID, data)
-					}
-				}
-
-				return res, nil
-			}
-		}
-	}
-
-	return nil, fmt.Errorf("business connection not found")
-}
-
 // resolvePeer tries in-memory cache first, falling back to Redis if needed,
 // and finally refreshing dialogs via MTProto before returning standard "chat not found".
 func (b *BotInstance) resolvePeer(chatID int64) (tg.InputPeerClass, error) {
@@ -1003,16 +922,18 @@ func (b *BotInstance) resolvePeer(chatID int64) (tg.InputPeerClass, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	hash, pType, ok, _ := b.redisStore.GetPeer(ctx, b.token, chatID)
-	if ok {
-		if pType == "channel" {
-			channelID := -chatID - 1000000000000
-			b.peers.SaveChannel(channelID, hash)
-			return &tg.InputPeerChannel{ChannelID: channelID, AccessHash: hash}, nil
-		}
-		if pType == "user" {
-			b.peers.SaveUser(chatID, hash)
-			return &tg.InputPeerUser{UserID: chatID, AccessHash: hash}, nil
+	if b.redisStore != nil {
+		hash, pType, ok, _ := b.redisStore.GetPeer(ctx, b.token, chatID)
+		if ok {
+			if pType == "channel" {
+				channelID := -chatID - 1000000000000
+				b.peers.SaveChannel(channelID, hash)
+				return &tg.InputPeerChannel{ChannelID: channelID, AccessHash: hash}, nil
+			}
+			if pType == "user" {
+				b.peers.SaveUser(chatID, hash)
+				return &tg.InputPeerUser{UserID: chatID, AccessHash: hash}, nil
+			}
 		}
 	}
 
@@ -1036,6 +957,10 @@ func (b *BotInstance) resolvePeer(chatID int64) (tg.InputPeerClass, error) {
 				return p, nil
 			}
 		}
+	}
+	if chatID > 0 {
+		// Telegram accepts a zero access hash for users that already contacted the bot.
+		return &tg.InputPeerUser{UserID: chatID}, nil
 	}
 
 	return nil, fmt.Errorf("chat not found")
@@ -1109,10 +1034,7 @@ func (b *BotInstance) SendMessage(ctx context.Context, req *converter.SendMessag
 	var updates tg.UpdatesClass
 	if req.BusinessConnectionID != "" {
 		var box tg.UpdatesBox
-		err = b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-			ConnectionID: req.BusinessConnectionID,
-			Query:        sendReq,
-		}, &box)
+		err = b.invokeBusiness(ctx, req.BusinessConnectionID, sendReq, &box)
 		if err != nil {
 			return nil, fmt.Errorf("mtproto business send message: %w", err)
 		}
@@ -1183,10 +1105,7 @@ func (b *BotInstance) EditMessageText(ctx context.Context, req *converter.EditMe
 
 	if req.BusinessConnectionID != "" {
 		var box tg.UpdatesBox
-		err = b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-			ConnectionID: req.BusinessConnectionID,
-			Query:        editReq,
-		}, &box)
+		err = b.invokeBusiness(ctx, req.BusinessConnectionID, editReq, &box)
 		if err != nil {
 			return nil, fmt.Errorf("mtproto business edit message text: %w", err)
 		}
@@ -1215,10 +1134,7 @@ func (b *BotInstance) DeleteMessage(ctx context.Context, req *converter.DeleteMe
 			Revoke: true,
 			ID:     []int{int(req.MessageID)},
 		}
-		err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-			ConnectionID: req.BusinessConnectionID,
-			Query:        deleteReq,
-		}, &box)
+		err := b.invokeBusiness(ctx, req.BusinessConnectionID, deleteReq, &box)
 		if err != nil {
 			return false, fmt.Errorf("mtproto business delete message: %w", err)
 		}
@@ -1294,10 +1210,7 @@ func (b *BotInstance) SendChatAction(ctx context.Context, req *converter.SendCha
 
 	if req.BusinessConnectionID != "" {
 		var res tg.BoolBox
-		err = b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-			ConnectionID: req.BusinessConnectionID,
-			Query:        setTypingReq,
-		}, &res)
+		err = b.invokeBusiness(ctx, req.BusinessConnectionID, setTypingReq, &res)
 	} else {
 		_, err = b.raw.MessagesSetTyping(ctx, setTypingReq)
 	}
@@ -1409,10 +1322,7 @@ func (b *BotInstance) EditMessageCaption(ctx context.Context, req *converter.Edi
 
 	if req.BusinessConnectionID != "" {
 		var box tg.UpdatesBox
-		err = b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-			ConnectionID: req.BusinessConnectionID,
-			Query:        editReq,
-		}, &box)
+		err = b.invokeBusiness(ctx, req.BusinessConnectionID, editReq, &box)
 		if err != nil {
 			return nil, fmt.Errorf("mtproto business edit message caption: %w", err)
 		}
@@ -1449,10 +1359,7 @@ func (b *BotInstance) EditMessageReplyMarkup(ctx context.Context, req *converter
 
 	if req.BusinessConnectionID != "" {
 		var box tg.UpdatesBox
-		err = b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-			ConnectionID: req.BusinessConnectionID,
-			Query:        editReq,
-		}, &box)
+		err = b.invokeBusiness(ctx, req.BusinessConnectionID, editReq, &box)
 		if err != nil {
 			return nil, fmt.Errorf("mtproto business edit reply markup: %w", err)
 		}
@@ -1519,10 +1426,7 @@ func (b *BotInstance) EditMessageMedia(ctx context.Context, req *converter.EditM
 	var updates tg.UpdatesClass
 	if req.BusinessConnectionID != "" {
 		var box tg.UpdatesBox
-		err = b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-			ConnectionID: req.BusinessConnectionID,
-			Query:        editReq,
-		}, &box)
+		err = b.invokeBusiness(ctx, req.BusinessConnectionID, editReq, &box)
 		if err != nil {
 			return nil, fmt.Errorf("mtproto business edit media: %w", err)
 		}
@@ -1644,10 +1548,7 @@ func (b *BotInstance) sendMedia(ctx context.Context, businessConnectionID string
 		}
 
 		var box tg.UpdatesBox
-		if err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-			ConnectionID: businessConnectionID,
-			Query:        sendReq,
-		}, &box); err != nil {
+		if err := b.invokeBusiness(ctx, businessConnectionID, sendReq, &box); err != nil {
 			return nil, err
 		}
 		return box.Updates, nil
@@ -2671,6 +2572,7 @@ func (b *BotInstance) Stop() {
 	b.webhookStopped = true
 	b.stopWebhookDeliveryLocked()
 	b.webhookMu.Unlock()
+	b.closeBusinessInvokers()
 	if b.cancel != nil {
 		b.cancel()
 	}
@@ -3857,10 +3759,7 @@ func (b *BotInstance) SendMediaGroup(ctx context.Context, req *converter.SendMed
 	var updates tg.UpdatesClass
 	if req.BusinessConnectionID != "" {
 		var box tg.UpdatesBox
-		err = b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-			ConnectionID: req.BusinessConnectionID,
-			Query:        sendReq,
-		}, &box)
+		err = b.invokeBusiness(ctx, req.BusinessConnectionID, sendReq, &box)
 		if err != nil {
 			return nil, fmt.Errorf("mtproto business send media group: %w", err)
 		}
@@ -3909,7 +3808,7 @@ func (b *BotInstance) SetBusinessAccountBio(ctx context.Context, connectionID, b
 	request := &tg.AccountUpdateProfileRequest{}
 	request.SetAbout(bio)
 	var user tg.UserBox
-	err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{ConnectionID: connectionID, Query: request}, &user)
+	err := b.invokeBusiness(ctx, connectionID, request, &user)
 	return err == nil, err
 }
 
@@ -3919,16 +3818,14 @@ func (b *BotInstance) SetBusinessAccountName(ctx context.Context, connectionID, 
 	request.SetFirstName(firstName)
 	request.SetLastName(lastName)
 	var user tg.UserBox
-	err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{ConnectionID: connectionID, Query: request}, &user)
+	err := b.invokeBusiness(ctx, connectionID, request, &user)
 	return err == nil, err
 }
 
 // SetBusinessAccountUsername changes or clears the username of a connected business account.
 func (b *BotInstance) SetBusinessAccountUsername(ctx context.Context, req *converter.SetBusinessAccountUsernameRequest) (bool, error) {
 	var result tg.UserBox
-	if err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-		ConnectionID: req.BusinessConnectionID, Query: &tg.AccountUpdateUsernameRequest{Username: req.Username},
-	}, &result); err != nil {
+	if err := b.invokeBusiness(ctx, req.BusinessConnectionID, &tg.AccountUpdateUsernameRequest{Username: req.Username}, &result); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -3938,9 +3835,7 @@ func (b *BotInstance) SetBusinessAccountUsername(ctx context.Context, req *conve
 func (b *BotInstance) RemoveBusinessAccountProfilePhoto(ctx context.Context, req *converter.RemoveBusinessAccountProfilePhotoRequest) (bool, error) {
 	request := &tg.PhotosUpdateProfilePhotoRequest{Fallback: req.IsPublic, ID: &tg.InputPhotoEmpty{}}
 	var result tg.PhotosPhoto
-	if err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-		ConnectionID: req.BusinessConnectionID, Query: request,
-	}, &result); err != nil {
+	if err := b.invokeBusiness(ctx, req.BusinessConnectionID, request, &result); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -3948,7 +3843,11 @@ func (b *BotInstance) RemoveBusinessAccountProfilePhoto(ctx context.Context, req
 
 // PostStory posts a story on behalf of a business account or bot.
 func (b *BotInstance) PostStory(ctx context.Context, req *converter.PostStoryRequest) (interface{}, error) {
-	peer, err := b.resolvePeer(req.ChatID)
+	connection, _, err := b.businessConnection(ctx, req.BusinessConnectionID, true)
+	if err != nil {
+		return nil, err
+	}
+	peer, err := b.resolvePeer(connection.UserChatID)
 	if err != nil {
 		return nil, err
 	}
@@ -3987,7 +3886,7 @@ func (b *BotInstance) PostStory(ctx context.Context, req *converter.PostStoryReq
 		request.SetPeriod(req.ActivePeriod)
 	}
 	var box tg.UpdatesBox
-	if err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{ConnectionID: req.BusinessConnectionID, Query: request}, &box); err != nil {
+	if err := b.invokeBusinessDirect(ctx, req.BusinessConnectionID, request, &box); err != nil {
 		return nil, err
 	}
 	storyID := 0
@@ -4014,7 +3913,7 @@ func (b *BotInstance) PostStory(ctx context.Context, req *converter.PostStoryReq
 	if storyID == 0 {
 		return nil, fmt.Errorf("story sent without story id")
 	}
-	return map[string]interface{}{"id": storyID, "chat": converter.Chat{ID: req.ChatID}, "date": int(time.Now().Unix())}, nil
+	return map[string]interface{}{"id": storyID, "chat": converter.Chat{ID: connection.UserChatID}, "date": int(time.Now().Unix())}, nil
 }
 
 // DeleteStory deletes a story previously posted through a business connection.
@@ -4029,9 +3928,7 @@ func (b *BotInstance) DeleteStory(ctx context.Context, req *converter.DeleteStor
 	}
 	request := &tg.StoriesDeleteStoriesRequest{Peer: peer, ID: []int{req.StoryID}}
 	var result tg.IntVector
-	if err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-		ConnectionID: req.BusinessConnectionID, Query: request,
-	}, &result); err != nil {
+	if err := b.invokeBusiness(ctx, req.BusinessConnectionID, request, &result); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -4045,9 +3942,7 @@ func (b *BotInstance) ReadBusinessMessage(ctx context.Context, req *converter.Re
 	}
 	request := &tg.MessagesReadHistoryRequest{Peer: peer, MaxID: int(req.MessageID)}
 	var result tg.MessagesAffectedMessages
-	if err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
-		ConnectionID: req.BusinessConnectionID, Query: request,
-	}, &result); err != nil {
+	if err := b.invokeBusiness(ctx, req.BusinessConnectionID, request, &result); err != nil {
 		return false, err
 	}
 	return true, nil

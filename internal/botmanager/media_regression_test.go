@@ -21,14 +21,29 @@ func mediaTestBot(fn telegram.InvokeFunc) *BotInstance {
 	client := telegram.NewClient(1, "test", telegram.Options{Middlewares: []telegram.Middleware{
 		telegram.MiddlewareFunc(func(tg.Invoker) telegram.InvokeFunc { return fn }),
 	}})
-	return &BotInstance{
+	bot := &BotInstance{
 		client: client,
 		raw:    tg.NewClient(fn), peers: peer.NewStorage(),
 		converter: converter.NewMTProtoConverter(), logger: zap.NewNop(),
-		self:       &converter.User{ID: 1, IsBot: true},
-		mediaCache: make(map[string]*tg.InputPhoto), docCache: make(map[string]*tg.InputDocument),
+		self:            &converter.User{ID: 1, IsBot: true},
+		busConns:        map[string]*converter.BusinessConnection{"business-test": {ID: "business-test", IsEnabled: true}},
+		busConnDCs:      map[string]int{"business-test": 4},
+		businessDCPools: make(map[int]telegram.CloseInvoker),
+		mediaCache:      make(map[string]*tg.InputPhoto), docCache: make(map[string]*tg.InputDocument),
 	}
+	bot.businessDCFactory = func(context.Context, int) (telegram.CloseInvoker, error) {
+		return testCloseInvoker{InvokeFunc: fn}, nil
+	}
+	bot.peers.SaveUser(123, 0)
+	bot.peers.SaveUser(456, 0)
+	return bot
 }
+
+type testCloseInvoker struct {
+	telegram.InvokeFunc
+}
+
+func (testCloseInvoker) Close() error { return nil }
 
 func TestRegressionExtractMediaUpdateVariants(t *testing.T) {
 	doc := &tg.Document{ID: 123, AccessHash: 456, DCID: 2, MimeType: "audio/ogg"}
