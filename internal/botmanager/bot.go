@@ -121,7 +121,7 @@ func NewBotInstance(
 		SessionStorage: redisStore.SessionStorage(token),
 		UpdateHandler:  bot,
 		Logger:         logzap.New(logging.MTProtoLogger(logger, mtprotoDebug)),
-		Middlewares:    []telegram.Middleware{businessErrorMiddleware{}},
+		Middlewares:    []telegram.Middleware{retryMiddleware{logger: logger}, businessErrorMiddleware{}},
 	}
 
 	if dialer != nil {
@@ -132,6 +132,45 @@ func NewBotInstance(
 
 	bot.client = telegram.NewClient(appID, appHash, opts)
 	return bot
+}
+
+type retryMiddleware struct {
+	logger *zap.Logger
+}
+
+func (m retryMiddleware) Handle(next tg.Invoker) telegram.InvokeFunc {
+	return func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
+		var err error
+		for attempt := 0; attempt < 3; attempt++ {
+			err = next.Invoke(ctx, input, output)
+			if err == nil {
+				return nil
+			}
+			if ctx.Err() != nil {
+				return err
+			}
+			errStr := err.Error()
+			if strings.Contains(errStr, "engine forcibly closed") ||
+				strings.Contains(errStr, "connection closed") ||
+				strings.Contains(errStr, "connection reset") ||
+				strings.Contains(errStr, "broken pipe") {
+				if m.logger != nil {
+					m.logger.Warn("Transient MTProto network drop, retrying request",
+						zap.Int("attempt", attempt+1),
+						zap.String("error", errStr),
+					)
+				}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(time.Duration(300*(attempt+1)) * time.Millisecond):
+					continue
+				}
+			}
+			return err
+		}
+		return err
+	}
 }
 
 type businessErrorMiddleware struct{}
