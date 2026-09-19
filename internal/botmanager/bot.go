@@ -1583,6 +1583,70 @@ func createReplyTo(replyParams *converter.ReplyParameters, replyToMsgID int64, t
 
 func (b *BotInstance) sendMedia(ctx context.Context, businessConnectionID string, sendReq *tg.MessagesSendMediaRequest) (tg.UpdatesClass, error) {
 	if businessConnectionID != "" {
+		switch m := sendReq.Media.(type) {
+		case *tg.InputMediaUploadedPhoto, *tg.InputMediaUploadedDocument,
+			*tg.InputMediaPhotoExternal, *tg.InputMediaDocumentExternal:
+			var spoiler bool
+			var ttlSeconds int
+			switch orig := m.(type) {
+			case *tg.InputMediaUploadedPhoto:
+				spoiler = orig.Spoiler
+				ttlSeconds = orig.TTLSeconds
+			case *tg.InputMediaPhotoExternal:
+				spoiler = orig.Spoiler
+				ttlSeconds = orig.TTLSeconds
+			case *tg.InputMediaUploadedDocument:
+				spoiler = orig.Spoiler
+				ttlSeconds = orig.TTLSeconds
+			case *tg.InputMediaDocumentExternal:
+				spoiler = orig.Spoiler
+				ttlSeconds = orig.TTLSeconds
+			}
+
+			res, err := b.raw.MessagesUploadMedia(ctx, &tg.MessagesUploadMediaRequest{
+				BusinessConnectionID: businessConnectionID,
+				Peer:                 sendReq.Peer,
+				Media:                m,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("pre-upload business media: %w", err)
+			}
+			switch uploaded := res.(type) {
+			case *tg.MessageMediaPhoto:
+				if p, ok := uploaded.Photo.(*tg.Photo); ok {
+					photoMedia := &tg.InputMediaPhoto{
+						ID: &tg.InputPhoto{
+							ID:            p.ID,
+							AccessHash:    p.AccessHash,
+							FileReference: p.FileReference,
+						},
+						Spoiler:    spoiler,
+						TTLSeconds: ttlSeconds,
+					}
+					sendReq.Media = photoMedia
+				} else {
+					return nil, fmt.Errorf("MessagesUploadMedia returned non-Photo: %T", uploaded.Photo)
+				}
+			case *tg.MessageMediaDocument:
+				if d, ok := uploaded.Document.(*tg.Document); ok {
+					docMedia := &tg.InputMediaDocument{
+						ID: &tg.InputDocument{
+							ID:            d.ID,
+							AccessHash:    d.AccessHash,
+							FileReference: d.FileReference,
+						},
+						Spoiler:    spoiler,
+						TTLSeconds: ttlSeconds,
+					}
+					sendReq.Media = docMedia
+				} else {
+					return nil, fmt.Errorf("MessagesUploadMedia returned non-Document: %T", uploaded.Document)
+				}
+			default:
+				return nil, fmt.Errorf("unexpected media type from MessagesUploadMedia: %T", res)
+			}
+		}
+
 		var box tg.UpdatesBox
 		if err := b.client.Invoke(ctx, &tg.InvokeWithBusinessConnectionRequest{
 			ConnectionID: businessConnectionID,
@@ -1748,22 +1812,12 @@ func (b *BotInstance) SendPhoto(ctx context.Context, req *converter.SendPhotoReq
 	msgID := extractSentMessageID(updates)
 
 	if req.Photo != "" {
-		if u, ok := updates.(*tg.Updates); ok {
-			for _, upd := range u.Updates {
-				if msgUpd, ok := upd.(*tg.UpdateNewMessage); ok {
-					if m, ok := msgUpd.Message.(*tg.Message); ok {
-						if pMedia, ok := m.Media.(*tg.MessageMediaPhoto); ok {
-							if photo, ok := pMedia.Photo.(*tg.Photo); ok {
-								b.setPhotoCache(ctx, req.Photo, &tg.InputPhoto{
-									ID:            photo.ID,
-									AccessHash:    photo.AccessHash,
-									FileReference: photo.FileReference,
-								})
-							}
-						}
-					}
-				}
-			}
+		if photo := extractPhotoFromUpdates(updates); photo != nil {
+			b.setPhotoCache(ctx, req.Photo, &tg.InputPhoto{
+				ID:            photo.ID,
+				AccessHash:    photo.AccessHash,
+				FileReference: photo.FileReference,
+			})
 		}
 	}
 
@@ -1949,22 +2003,12 @@ func (b *BotInstance) SendVideo(ctx context.Context, req *converter.SendVideoReq
 	msgID := extractSentMessageID(updates)
 
 	if req.Video != "" {
-		if u, ok := updates.(*tg.Updates); ok {
-			for _, upd := range u.Updates {
-				if msgUpd, ok := upd.(*tg.UpdateNewMessage); ok {
-					if m, ok := msgUpd.Message.(*tg.Message); ok {
-						if dMedia, ok := m.Media.(*tg.MessageMediaDocument); ok {
-							if doc, ok := dMedia.Document.(*tg.Document); ok {
-								b.setDocCache(ctx, req.Video, &tg.InputDocument{
-									ID:            doc.ID,
-									AccessHash:    doc.AccessHash,
-									FileReference: doc.FileReference,
-								})
-							}
-						}
-					}
-				}
-			}
+		if doc := extractDocFromUpdates(updates); doc != nil {
+			b.setDocCache(ctx, req.Video, &tg.InputDocument{
+				ID:            doc.ID,
+				AccessHash:    doc.AccessHash,
+				FileReference: doc.FileReference,
+			})
 		}
 	}
 
@@ -2660,6 +2704,14 @@ func extractSentMessage(updates tg.UpdatesClass) (int64, tg.ReplyMarkupClass) {
 				if msg, ok := m.Message.(*tg.Message); ok {
 					return int64(msg.ID), msg.ReplyMarkup
 				}
+			case *tg.UpdateBotNewBusinessMessage:
+				if msg, ok := m.Message.(*tg.Message); ok {
+					return int64(msg.ID), msg.ReplyMarkup
+				}
+			case *tg.UpdateBotEditBusinessMessage:
+				if msg, ok := m.Message.(*tg.Message); ok {
+					return int64(msg.ID), msg.ReplyMarkup
+				}
 			case *tg.UpdateMessageID:
 				return int64(m.ID), nil
 			}
@@ -2679,6 +2731,14 @@ func extractSentMessage(updates tg.UpdatesClass) (int64, tg.ReplyMarkupClass) {
 				if msg, ok := m.Message.(*tg.Message); ok {
 					return int64(msg.ID), msg.ReplyMarkup
 				}
+			case *tg.UpdateBotNewBusinessMessage:
+				if msg, ok := m.Message.(*tg.Message); ok {
+					return int64(msg.ID), msg.ReplyMarkup
+				}
+			case *tg.UpdateBotEditBusinessMessage:
+				if msg, ok := m.Message.(*tg.Message); ok {
+					return int64(msg.ID), msg.ReplyMarkup
+				}
 			case *tg.UpdateMessageID:
 				return int64(m.ID), nil
 			}
@@ -2690,6 +2750,50 @@ func extractSentMessage(updates tg.UpdatesClass) (int64, tg.ReplyMarkupClass) {
 func extractSentMessageID(updates tg.UpdatesClass) int64 {
 	id, _ := extractSentMessage(updates)
 	return id
+}
+
+func extractPhotoFromUpdates(updates tg.UpdatesClass) *tg.Photo {
+	if u, ok := updates.(*tg.Updates); ok {
+		for _, upd := range u.Updates {
+			var msg *tg.Message
+			switch m := upd.(type) {
+			case *tg.UpdateNewMessage:
+				msg, _ = m.Message.(*tg.Message)
+			case *tg.UpdateBotNewBusinessMessage:
+				msg, _ = m.Message.(*tg.Message)
+			}
+			if msg != nil {
+				if pMedia, ok := msg.Media.(*tg.MessageMediaPhoto); ok {
+					if photo, ok := pMedia.Photo.(*tg.Photo); ok {
+						return photo
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func extractDocFromUpdates(updates tg.UpdatesClass) *tg.Document {
+	if u, ok := updates.(*tg.Updates); ok {
+		for _, upd := range u.Updates {
+			var msg *tg.Message
+			switch m := upd.(type) {
+			case *tg.UpdateNewMessage:
+				msg, _ = m.Message.(*tg.Message)
+			case *tg.UpdateBotNewBusinessMessage:
+				msg, _ = m.Message.(*tg.Message)
+			}
+			if msg != nil {
+				if dMedia, ok := msg.Media.(*tg.MessageMediaDocument); ok {
+					if doc, ok := dMedia.Document.(*tg.Document); ok {
+						return doc
+					}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func min(a, b int) int {
@@ -3118,22 +3222,12 @@ func (b *BotInstance) SendAnimation(ctx context.Context, req *converter.SendAnim
 	msgID := extractSentMessageID(updates)
 
 	if req.Animation != "" {
-		if u, ok := updates.(*tg.Updates); ok {
-			for _, upd := range u.Updates {
-				if msgUpd, ok := upd.(*tg.UpdateNewMessage); ok {
-					if m, ok := msgUpd.Message.(*tg.Message); ok {
-						if dMedia, ok := m.Media.(*tg.MessageMediaDocument); ok {
-							if doc, ok := dMedia.Document.(*tg.Document); ok {
-								b.setDocCache(ctx, req.Animation, &tg.InputDocument{
-									ID:            doc.ID,
-									AccessHash:    doc.AccessHash,
-									FileReference: doc.FileReference,
-								})
-							}
-						}
-					}
-				}
-			}
+		if doc := extractDocFromUpdates(updates); doc != nil {
+			b.setDocCache(ctx, req.Animation, &tg.InputDocument{
+				ID:            doc.ID,
+				AccessHash:    doc.AccessHash,
+				FileReference: doc.FileReference,
+			})
 		}
 	}
 
@@ -3687,15 +3781,20 @@ func (b *BotInstance) SendMediaGroup(ctx context.Context, req *converter.SendMed
 	switch u := updates.(type) {
 	case *tg.Updates:
 		for _, upd := range u.Updates {
-			if msgUpd, ok := upd.(*tg.UpdateNewMessage); ok {
-				if m, ok := msgUpd.Message.(*tg.Message); ok {
-					messages = append(messages, &converter.Message{
-						MessageID: int64(m.ID),
-						From:      b.GetMe(),
-						Chat:      converter.Chat{ID: req.ChatID},
-						Date:      now,
-					})
-				}
+			var msg *tg.Message
+			switch m := upd.(type) {
+			case *tg.UpdateNewMessage:
+				msg, _ = m.Message.(*tg.Message)
+			case *tg.UpdateBotNewBusinessMessage:
+				msg, _ = m.Message.(*tg.Message)
+			}
+			if msg != nil {
+				messages = append(messages, &converter.Message{
+					MessageID: int64(msg.ID),
+					From:      b.GetMe(),
+					Chat:      converter.Chat{ID: req.ChatID},
+					Date:      now,
+				})
 			}
 		}
 	}
