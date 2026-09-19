@@ -153,19 +153,32 @@ func (b *BotInstance) businessInvoker(ctx context.Context, dcID int) (telegram.C
 	return invoker, nil
 }
 
+func (b *BotInstance) invokeInBusinessDC(ctx context.Context, dcID int, input bin.Encoder, output bin.Decoder) error {
+	// auth.exportAuthorization only accepts a different target DC. Reuse the
+	// primary client when the business connection already belongs to its DC.
+	if b.businessCurrentDC != nil && b.businessCurrentDC() == dcID {
+		if b.client == nil {
+			return fmt.Errorf("primary datacenter client is unavailable")
+		}
+		return b.client.Invoke(ctx, input, output)
+	}
+
+	invoker, err := b.businessInvoker(ctx, dcID)
+	if err != nil {
+		return err
+	}
+	invoke := businessErrorMiddleware{}.Handle(invoker)
+	invoke = retryMiddleware{logger: b.logger}.Handle(invoke)
+	return invoke(ctx, input, output)
+}
+
 func (b *BotInstance) invokeBusiness(ctx context.Context, connectionID string, query bin.Object, output bin.Decoder) error {
 	_, dcID, err := b.businessConnection(ctx, connectionID, true)
 	if err != nil {
 		return err
 	}
-	invoker, err := b.businessInvoker(ctx, dcID)
-	if err != nil {
-		return err
-	}
 	request := &tg.InvokeWithBusinessConnectionRequest{ConnectionID: connectionID, Query: query}
-	invoke := businessErrorMiddleware{}.Handle(invoker)
-	invoke = retryMiddleware{logger: b.logger}.Handle(invoke)
-	return invoke(ctx, request, output)
+	return b.invokeInBusinessDC(ctx, dcID, request, output)
 }
 
 // invokeBusinessDirect routes business-ready methods that must not be wrapped,
@@ -175,11 +188,7 @@ func (b *BotInstance) invokeBusinessDirect(ctx context.Context, connectionID str
 	if err != nil {
 		return err
 	}
-	invoker, err := b.businessInvoker(ctx, dcID)
-	if err != nil {
-		return err
-	}
-	return retryMiddleware{logger: b.logger}.Handle(invoker)(ctx, query, output)
+	return b.invokeInBusinessDC(ctx, dcID, query, output)
 }
 
 func (b *BotInstance) closeBusinessInvokers() {

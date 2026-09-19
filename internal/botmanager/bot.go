@@ -68,6 +68,7 @@ type BotInstance struct {
 
 	businessDCMu      sync.Mutex
 	businessDCPools   map[int]telegram.CloseInvoker
+	businessCurrentDC func() int
 	businessDCFactory func(context.Context, int) (telegram.CloseInvoker, error)
 
 	mediaCacheMu sync.RWMutex
@@ -144,6 +145,9 @@ func NewBotInstance(
 	}
 
 	bot.client = telegram.NewClient(appID, appHash, opts)
+	bot.businessCurrentDC = func() int {
+		return bot.client.Config().ThisDC
+	}
 	bot.businessDCFactory = func(ctx context.Context, dcID int) (telegram.CloseInvoker, error) {
 		return bot.client.DC(ctx, dcID, 2)
 	}
