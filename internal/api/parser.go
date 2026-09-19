@@ -6,17 +6,12 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/valyala/fasthttp"
 )
-
-func isStringField(k string) bool {
-	return k == "business_connection_id" || k == "file_id" || strings.HasSuffix(k, "file_id") || k == "custom_emoji_id" ||
-		k == "chat_join_request_query_id" || k == "custom_query_id" || k == "guest_query_id" || k == "owned_gift_id" ||
-		k == "telegram_payment_charge_id" || k == "inline_message_id" || k == "draft_id" || k == "method"
-}
 
 // bindRequest universally extracts and binds request parameters from:
 // 1. application/json body
@@ -24,7 +19,7 @@ func isStringField(k string) bool {
 // 3. multipart/form-data
 // 4. URL query parameters (GET or POST)
 func bindRequest(ctx *fasthttp.RequestCtx, target interface{}) error {
-	body := ctx.PostBody()
+	body := bytes.TrimSpace(ctx.PostBody())
 	isJSONBody := len(body) > 0 && (body[0] == '{' || body[0] == '[')
 
 	// If it's a pure JSON body and no query parameters exist, try direct unmarshal first for speed
@@ -34,26 +29,37 @@ func bindRequest(ctx *fasthttp.RequestCtx, target interface{}) error {
 		}
 	}
 
+	fields := requestFieldTypes(target)
+	parse := func(k, val string) interface{} {
+		switch k {
+		case "thumb":
+			k = "thumbnail"
+		case "png_sticker":
+			k = "sticker"
+		}
+		return parseArgValue(val, fields[k])
+	}
+
 	// Universal extraction into intermediate map
 	data := make(map[string]interface{})
 
 	// 1. Parse URL Query parameters
 	ctx.QueryArgs().VisitAll(func(k, v []byte) {
 		key := string(k)
-		data[key] = parseArgValue(key, string(v))
+		data[key] = parse(key, string(v))
 	})
 
 	// 2. Parse form-urlencoded POST arguments
 	ctx.PostArgs().VisitAll(func(k, v []byte) {
 		key := string(k)
-		data[key] = parseArgValue(key, string(v))
+		data[key] = parse(key, string(v))
 	})
 
 	// 3. Parse multipart/form-data if present
 	if mf, err := ctx.MultipartForm(); err == nil && mf != nil {
 		for k, vals := range mf.Value {
 			if len(vals) > 0 {
-				data[k] = parseArgValue(k, vals[0])
+				data[k] = parse(k, vals[0])
 			}
 		}
 	}
@@ -71,7 +77,7 @@ func bindRequest(ctx *fasthttp.RequestCtx, target interface{}) error {
 			if pName != "" && pFilename == "" {
 				if _, exists := data[pName]; !exists {
 					if valBytes, err := io.ReadAll(p); err == nil {
-						data[pName] = parseArgValue(pName, string(valBytes))
+						data[pName] = parse(pName, string(valBytes))
 					}
 				}
 			}
@@ -80,31 +86,20 @@ func bindRequest(ctx *fasthttp.RequestCtx, target interface{}) error {
 
 	// 4. If body was JSON, overlay parsed JSON fields onto data
 	if isJSONBody {
+		if !json.Valid(body) {
+			return fmt.Errorf("invalid JSON arguments")
+		}
 		var bodyMap map[string]interface{}
-		if err := json.Unmarshal(body, &bodyMap); err == nil {
-			for k, v := range bodyMap {
-				if str, ok := v.(string); ok {
-					// Normalize numeric strings for ID fields
-					if !isStringField(k) {
-						if n, err := strconv.ParseInt(str, 10, 64); err == nil &&
-							(strings.HasSuffix(k, "_id") || strings.HasSuffix(k, "id") || k == "offset" || k == "limit") {
-							data[k] = n
-							continue
-						}
-					}
-					// Normalize JSON strings in reply_markup
-					trimmed := strings.TrimSpace(str)
-					if (strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}")) ||
-						(strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]")) {
-						var nested interface{}
-						if err := json.Unmarshal([]byte(trimmed), &nested); err == nil {
-							data[k] = nested
-							continue
-						}
-					}
-				}
-				data[k] = v
+		decoder := json.NewDecoder(bytes.NewReader(body))
+		decoder.UseNumber()
+		if err := decoder.Decode(&bodyMap); err != nil {
+			return fmt.Errorf("decode JSON arguments: %w", err)
+		}
+		for k, v := range bodyMap {
+			if str, ok := v.(string); ok {
+				v = parse(k, str)
 			}
+			data[k] = v
 		}
 	}
 
@@ -138,30 +133,67 @@ func bindRequest(ctx *fasthttp.RequestCtx, target interface{}) error {
 	return nil
 }
 
-func parseArgValue(k string, val string) interface{} {
+// Derive coercion rules from the request model, never from the value's spelling.
+func requestFieldTypes(target interface{}) map[string]reflect.Type {
+	fields := make(map[string]reflect.Type)
+	typ := reflect.TypeOf(target)
+	for typ != nil && typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
+	if typ == nil || typ.Kind() != reflect.Struct {
+		return fields
+	}
+	for _, field := range reflect.VisibleFields(typ) {
+		if !field.IsExported() {
+			continue
+		}
+		name := strings.Split(field.Tag.Get("json"), ",")[0]
+		if name == "-" {
+			continue
+		}
+		if name == "" {
+			name = field.Name
+		}
+		fields[name] = field.Type
+	}
+	return fields
+}
+
+func parseArgValue(val string, typ reflect.Type) interface{} {
+	if typ == nil {
+		return val
+	}
+	for typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
 	trimmed := strings.TrimSpace(val)
-	if trimmed == "true" {
-		return true
-	}
-	if trimmed == "false" {
-		return false
-	}
-	// Check if JSON object or array (e.g. reply_markup, link_preview_options, allowed_updates)
-	if (strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}")) ||
-		(strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]")) {
-		var obj interface{}
-		if err := json.Unmarshal([]byte(trimmed), &obj); err == nil {
-			return obj
+	switch typ.Kind() {
+	case reflect.String:
+		return val
+	case reflect.Bool:
+		if v, err := strconv.ParseBool(trimmed); err == nil {
+			return v
 		}
-	}
-	if !isStringField(k) {
-		// Try integer
-		if n, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
-			return n
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if v, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+			return v
 		}
-		// Try float
-		if f, err := strconv.ParseFloat(trimmed, 64); err == nil && strings.Contains(trimmed, ".") {
-			return f
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if v, err := strconv.ParseUint(trimmed, 10, 64); err == nil {
+			return v
+		}
+	case reflect.Float32, reflect.Float64:
+		if v, err := strconv.ParseFloat(trimmed, 64); err == nil {
+			return v
+		}
+	case reflect.Struct, reflect.Map, reflect.Slice, reflect.Array, reflect.Interface:
+		var v interface{}
+		if json.Valid([]byte(trimmed)) {
+			decoder := json.NewDecoder(strings.NewReader(trimmed))
+			decoder.UseNumber()
+			if err := decoder.Decode(&v); err == nil {
+				return v
+			}
 		}
 	}
 	return val

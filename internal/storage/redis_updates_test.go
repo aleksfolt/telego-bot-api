@@ -194,10 +194,10 @@ func TestDropPendingUpdates(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, entries)
 
-	// update_id counter must also be reset so next NextUpdateID starts from 1
+	// Dropping pending events must not invalidate an existing polling offset.
 	uid, err := store.NextUpdateID(ctx, botID)
 	require.NoError(t, err)
-	assert.Equal(t, 1, uid)
+	assert.Equal(t, 3, uid)
 }
 
 func TestReadUpdates_EmptyStreamReturnsEmpty(t *testing.T) {

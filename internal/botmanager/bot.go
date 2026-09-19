@@ -69,6 +69,12 @@ type BotInstance struct {
 	mediaCache   map[string]*tg.InputPhoto
 	docCache     map[string]*tg.InputDocument
 
+	webhookMu      sync.Mutex
+	webhookCancel  context.CancelFunc
+	webhookDone    chan struct{}
+	webhookWake    chan struct{}
+	webhookStopped bool
+
 	cancel context.CancelFunc
 	ready  chan struct{}
 }
@@ -198,14 +204,7 @@ func (b *BotInstance) Token() string {
 func (b *BotInstance) Start(ctx context.Context) error {
 	ctx, b.cancel = context.WithCancel(ctx)
 
-	// Restore webhook configuration from Redis if present
-	if wh, err := b.redisStore.GetWebhook(ctx, b.token); err == nil && wh != nil {
-		b.mu.Lock()
-		b.webhookURL = wh.URL
-		b.secretToken = wh.SecretToken
-		b.mu.Unlock()
-		b.logger.Info("Restored webhook from Redis", zap.String("url", wh.URL))
-	}
+	b.restoreWebhookConfig(ctx)
 
 	errChan := make(chan error, 1)
 
@@ -363,6 +362,7 @@ func (b *BotInstance) Start(ctx context.Context) error {
 	case err := <-errChan:
 		return err
 	case <-b.ready:
+		b.restartWebhookDelivery()
 		return nil
 	case <-time.After(20 * time.Second):
 		return fmt.Errorf("timeout waiting for bot connection to Telegram DC")
@@ -375,7 +375,6 @@ func (b *BotInstance) Handle(ctx context.Context, u tg.UpdatesClass) error {
 
 	b.mu.RLock()
 	url := b.webhookURL
-	secret := b.secretToken
 	botID := b.botID
 	b.mu.RUnlock()
 
@@ -475,22 +474,7 @@ func (b *BotInstance) Handle(ctx context.Context, u tg.UpdatesClass) error {
 		kind := updateKind(upd)
 		sender := describeUpdateSender(upd)
 		if url != "" {
-			b.dispatcher.EnqueueTask(&webhook.Task{
-				BotID:       botID,
-				URL:         url,
-				SecretToken: secret,
-				Update:      upd,
-				OnSuccess: func(bID int64, uID int) {
-					ackCtx, ackCancel := context.WithTimeout(context.Background(), 2*time.Second)
-					defer ackCancel()
-					_ = b.redisStore.AckUpdates(ackCtx, bID, uID)
-				},
-				OnError: func(bID int64, err error) {
-					errCtx, errCancel := context.WithTimeout(context.Background(), 2*time.Second)
-					defer errCancel()
-					_ = b.redisStore.UpdateWebhookDeliveryError(errCtx, b.token, err.Error())
-				},
-			})
+			b.notifyWebhookDelivery()
 			b.logger.Info("Update received -> Webhook",
 				zap.Int("update_id", upd.UpdateID),
 				zap.String("type", kind),
@@ -552,6 +536,7 @@ func (b *BotInstance) GetUpdates(ctx context.Context, offset, limit, timeout int
 		readOffset = 0
 	}
 
+	cursor := ""
 	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 
 	for {
@@ -568,7 +553,13 @@ func (b *BotInstance) GetUpdates(ctx context.Context, offset, limit, timeout int
 		}
 
 		readCtx, readCancel := context.WithTimeout(ctx, remaining+2*time.Second)
-		entries, err := b.redisStore.ReadUpdates(readCtx, botID, readOffset, limit, blockDuration)
+		var entries []storage.UpdateEntry
+		var err error
+		if cursor == "" {
+			entries, err = b.redisStore.ReadUpdates(readCtx, botID, readOffset, limit, blockDuration)
+		} else {
+			entries, err = b.redisStore.ReadUpdatesAfter(readCtx, botID, cursor, limit, blockDuration)
+		}
 		readCancel()
 
 		if err != nil {
@@ -582,6 +573,7 @@ func (b *BotInstance) GetUpdates(ctx context.Context, offset, limit, timeout int
 		// Deserialise and apply allowed_updates filter
 		var res []*converter.Update
 		for _, entry := range entries {
+			cursor = entry.StreamID
 			var upd converter.Update
 			if err := json.Unmarshal(entry.Payload, &upd); err != nil {
 				b.logger.Warn("Failed to unmarshal update from Redis Stream",
@@ -593,7 +585,7 @@ func (b *BotInstance) GetUpdates(ctx context.Context, offset, limit, timeout int
 			}
 		}
 
-		if len(res) > 0 || timeout == 0 || time.Now().After(deadline) {
+		if len(res) > 0 || (len(entries) == 0 && (timeout == 0 || time.Now().After(deadline))) {
 			if res == nil {
 				return []*converter.Update{}, nil
 			}
@@ -705,51 +697,38 @@ func (b *BotInstance) DropPendingUpdates(ctx context.Context) error {
 // SetWebhook sets the webhook URL for the bot and persists it to Redis.
 // If dropPending is true, all pending updates are discarded.
 func (b *BotInstance) SetWebhook(ctx context.Context, url, secretToken string, dropPending bool) error {
-	b.mu.Lock()
-	b.webhookURL = url
-	b.secretToken = secretToken
-	b.mu.Unlock()
-
-	data := &storage.WebhookData{
-		URL:         url,
-		SecretToken: secretToken,
-		UpdatedAt:   time.Now(),
-	}
+	b.webhookMu.Lock()
+	defer b.webhookMu.Unlock()
+	b.stopWebhookDeliveryLocked()
+	defer b.startWebhookDeliveryLocked()
+	data := &storage.WebhookData{URL: url, SecretToken: secretToken, UpdatedAt: time.Now()}
 	if err := b.redisStore.SaveWebhook(ctx, b.token, data); err != nil {
-		b.logger.Error("Failed to save webhook to Redis", zap.Error(err))
 		return err
 	}
-
+	b.mu.Lock()
+	b.webhookURL, b.secretToken = url, secretToken
+	b.mu.Unlock()
 	if dropPending {
-		if err := b.DropPendingUpdates(ctx); err != nil {
-			b.logger.Warn("Failed to drop pending updates during SetWebhook", zap.Error(err))
-		}
+		return b.DropPendingUpdates(ctx)
 	}
-
-	b.logger.Info("Webhook set successfully", zap.String("url", url))
 	return nil
 }
 
-// DeleteWebhook removes the webhook from memory and Redis.
-// If dropPending is true, all pending updates are discarded.
+// DeleteWebhook cancels queued delivery and preserves pending updates for polling.
 func (b *BotInstance) DeleteWebhook(ctx context.Context, dropPending bool) error {
-	b.mu.Lock()
-	b.webhookURL = ""
-	b.secretToken = ""
-	b.mu.Unlock()
-
+	b.webhookMu.Lock()
+	defer b.webhookMu.Unlock()
+	b.stopWebhookDeliveryLocked()
+	defer b.startWebhookDeliveryLocked()
 	if err := b.redisStore.DeleteWebhook(ctx, b.token); err != nil {
-		b.logger.Error("Failed to delete webhook from Redis", zap.Error(err))
 		return err
 	}
-
+	b.mu.Lock()
+	b.webhookURL, b.secretToken = "", ""
+	b.mu.Unlock()
 	if dropPending {
-		if err := b.DropPendingUpdates(ctx); err != nil {
-			b.logger.Warn("Failed to drop pending updates during DeleteWebhook", zap.Error(err))
-		}
+		return b.DropPendingUpdates(ctx)
 	}
-
-	b.logger.Info("Webhook deleted")
 	return nil
 }
 
@@ -1231,7 +1210,7 @@ func (b *BotInstance) EditMessageText(ctx context.Context, req *converter.EditMe
 // DeleteMessage deletes a message from a chat.
 func (b *BotInstance) DeleteMessage(ctx context.Context, req *converter.DeleteMessageRequest) (bool, error) {
 	if req.BusinessConnectionID != "" {
-		var box tg.UpdatesBox
+		var box tg.MessagesAffectedMessages
 		deleteReq := &tg.MessagesDeleteMessagesRequest{
 			Revoke: true,
 			ID:     []int{int(req.MessageID)},
@@ -2688,6 +2667,10 @@ func (b *BotInstance) GetChatMember(ctx context.Context, req *converter.GetChatM
 
 // Stop terminates the MTProto client connection.
 func (b *BotInstance) Stop() {
+	b.webhookMu.Lock()
+	b.webhookStopped = true
+	b.stopWebhookDeliveryLocked()
+	b.webhookMu.Unlock()
 	if b.cancel != nil {
 		b.cancel()
 	}
