@@ -25,6 +25,7 @@ func TestRegressionBusinessSendUsesConnectionDatacenter(t *testing.T) {
 	})
 	b := mediaTestBot(invoke)
 	b.busConnDCs["business-test"] = 7
+	b.businessCurrentDC = func() int { return 2 }
 	b.businessDCFactory = func(ctx context.Context, dcID int) (telegram.CloseInvoker, error) {
 		requestedDC = dcID
 		return testCloseInvoker{InvokeFunc: invoke}, nil
@@ -38,6 +39,33 @@ func TestRegressionBusinessSendUsesConnectionDatacenter(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 7, requestedDC)
 	require.Equal(t, int64(42), message.MessageID)
+}
+
+func TestRegressionBusinessSendReusesPrimaryDatacenter(t *testing.T) {
+	invoked := false
+	b := mediaTestBot(func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
+		invoked = true
+		wrapped, ok := input.(*tg.InvokeWithBusinessConnectionRequest)
+		require.True(t, ok)
+		require.IsType(t, &tg.MessagesSendMessageRequest{}, wrapped.Query)
+		output.(*tg.UpdatesBox).Updates = &tg.UpdateShortSentMessage{ID: 43}
+		return nil
+	})
+	b.busConnDCs["business-test"] = 2
+	b.businessCurrentDC = func() int { return 2 }
+	b.businessDCFactory = func(context.Context, int) (telegram.CloseInvoker, error) {
+		t.Fatal("same-DC request attempted an authorization transfer")
+		return nil, nil
+	}
+
+	message, err := b.SendMessage(context.Background(), &converter.SendMessageRequest{
+		BusinessConnectionID: "business-test",
+		ChatID:               123,
+		Text:                 "hello",
+	})
+	require.NoError(t, err)
+	require.True(t, invoked)
+	require.Equal(t, int64(43), message.MessageID)
 }
 
 func TestRegressionBusinessStoryIsNotWrapped(t *testing.T) {
