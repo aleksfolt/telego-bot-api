@@ -113,6 +113,27 @@ func TestRegressionSendPhotoReturnsUploadedMetadata(t *testing.T) {
 	require.Equal(t, int64(42), msg.MessageID)
 }
 
+func TestRegressionUserProfilePhotoSizesHaveStableOrder(t *testing.T) {
+	newPhoto := func(sizes []tg.PhotoSizeClass) *tg.Photo {
+		return &tg.Photo{ID: 987, AccessHash: 654, DCID: 2, Sizes: sizes}
+	}
+	small := &tg.PhotoSize{Type: "s", W: 100, H: 100, Size: 1_000}
+	medium := &tg.PhotoSizeProgressive{Type: "m", W: 320, H: 320, Sizes: []int{2_000, 5_000}}
+	large := &tg.PhotoSize{Type: "x", W: 800, H: 800, Size: 20_000}
+	emptyType := &tg.PhotoSize{Type: "", W: 50, H: 50, Size: 500}
+
+	forward := convertUserProfilePhotoSizes(newPhoto([]tg.PhotoSizeClass{large, emptyType, small, medium}))
+	reversed := convertUserProfilePhotoSizes(newPhoto([]tg.PhotoSizeClass{medium, small, emptyType, large}))
+
+	require.Equal(t, forward, reversed, "MTProto size order must not affect the Bot API response")
+	require.Equal(t, []string{"987_s", "987_m", "987_x"}, []string{
+		forward[0].FileUniqueID,
+		forward[1].FileUniqueID,
+		forward[2].FileUniqueID,
+	})
+	require.Equal(t, 5_000, forward[1].FileSize)
+}
+
 func TestRegressionClearCaptionSetsPresenceFlag(t *testing.T) {
 	b := mediaTestBot(func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
 		var wire bin.Buffer

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -3368,31 +3369,7 @@ func (b *BotInstance) GetUserProfilePhotos(ctx context.Context, req *converter.G
 	resultPhotos := make([][]converter.PhotoSize, 0, len(photosList))
 	for _, pc := range photosList {
 		if photo, ok := pc.(*tg.Photo); ok {
-			var sizes []converter.PhotoSize
-			for _, sc := range photo.Sizes {
-				switch s := sc.(type) {
-				case *tg.PhotoSize:
-					fid := fileid.FromPhoto(photo, []rune(s.Type)[0])
-					encodedID, _ := fileid.EncodeFileID(fid)
-					sizes = append(sizes, converter.PhotoSize{
-						FileID:       encodedID,
-						FileUniqueID: fmt.Sprintf("%d_%s", photo.ID, s.Type),
-						Width:        s.W,
-						Height:       s.H,
-						FileSize:     s.Size,
-					})
-				case *tg.PhotoSizeProgressive:
-					fid := fileid.FromPhoto(photo, []rune(s.Type)[0])
-					encodedID, _ := fileid.EncodeFileID(fid)
-					sizes = append(sizes, converter.PhotoSize{
-						FileID:       encodedID,
-						FileUniqueID: fmt.Sprintf("%d_%s", photo.ID, s.Type),
-						Width:        s.W,
-						Height:       s.H,
-						FileSize:     0,
-					})
-				}
-			}
+			sizes := convertUserProfilePhotoSizes(photo)
 			if len(sizes) > 0 {
 				resultPhotos = append(resultPhotos, sizes)
 			}
@@ -3403,6 +3380,65 @@ func (b *BotInstance) GetUserProfilePhotos(ctx context.Context, req *converter.G
 		TotalCount: totalCount,
 		Photos:     resultPhotos,
 	}, nil
+}
+
+// convertUserProfilePhotoSizes converts and sorts thumbnail variants so callers
+// receive the same order even when MTProto returns photo.Sizes in a different order.
+func convertUserProfilePhotoSizes(photo *tg.Photo) []converter.PhotoSize {
+	sizes := make([]converter.PhotoSize, 0, len(photo.Sizes))
+	for _, sc := range photo.Sizes {
+		var sizeType string
+		var width, height int
+		var fileSize int
+
+		switch s := sc.(type) {
+		case *tg.PhotoSize:
+			sizeType, width, height, fileSize = s.Type, s.W, s.H, s.Size
+		case *tg.PhotoSizeProgressive:
+			sizeType, width, height = s.Type, s.W, s.H
+			if len(s.Sizes) > 0 {
+				fileSize = s.Sizes[len(s.Sizes)-1]
+			}
+		default:
+			continue
+		}
+
+		typeRunes := []rune(sizeType)
+		if len(typeRunes) == 0 {
+			continue
+		}
+		encodedID, err := fileid.EncodeFileID(fileid.FromPhoto(photo, typeRunes[0]))
+		if err != nil {
+			continue
+		}
+		sizes = append(sizes, converter.PhotoSize{
+			FileID:       encodedID,
+			FileUniqueID: fmt.Sprintf("%d_%s", photo.ID, sizeType),
+			Width:        width,
+			Height:       height,
+			FileSize:     fileSize,
+		})
+	}
+
+	sort.SliceStable(sizes, func(i, j int) bool {
+		leftArea := int64(sizes[i].Width) * int64(sizes[i].Height)
+		rightArea := int64(sizes[j].Width) * int64(sizes[j].Height)
+		if leftArea != rightArea {
+			return leftArea < rightArea
+		}
+		if sizes[i].Width != sizes[j].Width {
+			return sizes[i].Width < sizes[j].Width
+		}
+		if sizes[i].Height != sizes[j].Height {
+			return sizes[i].Height < sizes[j].Height
+		}
+		if sizes[i].FileSize != sizes[j].FileSize {
+			return sizes[i].FileSize < sizes[j].FileSize
+		}
+		return sizes[i].FileUniqueID < sizes[j].FileUniqueID
+	})
+
+	return sizes
 }
 
 // resolveInputSingleMedia converts an InputMediaItem into an InputMediaClass suitable for MessagesSendMultiMedia.
