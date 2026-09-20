@@ -750,7 +750,10 @@ func (s *Server) handleUnpinAllChatMessages(ctx *fasthttp.RequestCtx, bot *botma
 
 func (s *Server) handleGetMyCommands(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
 	var req converter.GetMyCommandsRequest
-	_ = bindRequest(ctx, &req)
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
 	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -764,7 +767,10 @@ func (s *Server) handleGetMyCommands(ctx *fasthttp.RequestCtx, bot *botmanager.B
 
 func (s *Server) handleDeleteMyCommands(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
 	var req converter.DeleteMyCommandsRequest
-	_ = bindRequest(ctx, &req)
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
 	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -795,7 +801,10 @@ func (s *Server) handleSetMyName(ctx *fasthttp.RequestCtx, bot *botmanager.BotIn
 
 func (s *Server) handleGetMyName(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
 	var req converter.GetMyNameRequest
-	_ = bindRequest(ctx, &req)
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
 	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -826,7 +835,10 @@ func (s *Server) handleSetMyDescription(ctx *fasthttp.RequestCtx, bot *botmanage
 
 func (s *Server) handleGetMyDescription(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
 	var req converter.GetMyDescriptionRequest
-	_ = bindRequest(ctx, &req)
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
 	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -857,7 +869,10 @@ func (s *Server) handleSetMyShortDescription(ctx *fasthttp.RequestCtx, bot *botm
 
 func (s *Server) handleGetMyShortDescription(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
 	var req converter.GetMyShortDescriptionRequest
-	_ = bindRequest(ctx, &req)
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
 	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -1253,7 +1268,10 @@ func (s *Server) handleRefundStarPayment(ctx *fasthttp.RequestCtx, bot *botmanag
 
 func (s *Server) handleGetStarTransactions(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
 	var req converter.GetStarTransactionsRequest
-	_ = bindRequest(ctx, &req)
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
 	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -1728,7 +1746,10 @@ func (s *Server) handleReadBusinessConnection(ctx *fasthttp.RequestCtx, bot *bot
 	var req struct {
 		BusinessConnectionID string `json:"business_connection_id"`
 	}
-	_ = bindRequest(ctx, &req)
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
 	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
