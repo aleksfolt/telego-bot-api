@@ -53,7 +53,7 @@ func main() {
 	cfg := Config{}
 	flag.StringVar(&cfg.ServerURL, "server", "http://127.0.0.1:8082", "telego-bot-api server address")
 	flag.StringVar(&cfg.PprofURL, "pprof", "http://127.0.0.1:6060", "pprof diagnostic server address (empty to disable)")
-	flag.StringVar(&cfg.Token, "token", "7026718333:AAHIlgGrBLc4yWSv6JfYDArpRchYuXidNNM", "Bot token to stress test")
+	flag.StringVar(&cfg.Token, "token", "<BOT_TOKEN>", "Bot token to stress test")
 	flag.IntVar(&cfg.Concurrency, "concurrency", 100, "Number of concurrent worker goroutines")
 	flag.DurationVar(&cfg.Duration, "duration", 20*time.Second, "Duration of the stress test")
 	flag.IntVar(&cfg.RateLimit, "rate", 0, "Max requests per second (0 = unlimited)")
@@ -455,4 +455,3 @@ func runWebhookScenario(cfg Config, baseline PprofMetrics) {
 
 	printResults(stats, baseline, final, cfg)
 }
-

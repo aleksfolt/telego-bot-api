@@ -23,7 +23,7 @@ export const options = {
 };
 
 const BASE_URL = __ENV.SERVER_URL || 'http://127.0.0.1:8082';
-const BOT_TOKEN = __ENV.BOT_TOKEN || '7026718333:AAHIlgGrBLc4yWSv6JfYDArpRchYuXidNNM';
+const BOT_TOKEN = __ENV.BOT_TOKEN || '<BOT_TOKEN>';
 
 const ENDPOINTS = [
   'getMe',
