@@ -30,11 +30,11 @@ var DefaultRegistry = NewRegistry()
 
 func NewRegistry() *Registry {
 	return &Registry{
-		requestsTotal:   make(map[string]*atomic.Uint64),
-		durationSum:     make(map[string]*atomic.Uint64),
-		durationCnt:     make(map[string]*atomic.Uint64),
-		webhookStatus:   make(map[string]*atomic.Uint64),
-		startTime:       time.Now(),
+		requestsTotal: make(map[string]*atomic.Uint64),
+		durationSum:   make(map[string]*atomic.Uint64),
+		durationCnt:   make(map[string]*atomic.Uint64),
+		webhookStatus: make(map[string]*atomic.Uint64),
+		startTime:     time.Now(),
 	}
 }
 
@@ -70,11 +70,16 @@ func (r *Registry) ObserveDuration(method string, d time.Duration) {
 	if !ok {
 		r.durationsMu.Lock()
 		sumCounter, ok = r.durationSum[method]
-		if !ok {
-			sumCounter = &atomic.Uint64{}
-			cntCounter = &atomic.Uint64{}
-			r.durationSum[method] = sumCounter
-			r.durationCnt[method] = cntCounter
+		cntCounter = r.durationCnt[method]
+		if !ok || cntCounter == nil {
+			if !ok {
+				sumCounter = &atomic.Uint64{}
+				r.durationSum[method] = sumCounter
+			}
+			if cntCounter == nil {
+				cntCounter = &atomic.Uint64{}
+				r.durationCnt[method] = cntCounter
+			}
 		}
 		r.durationsMu.Unlock()
 	}

@@ -3,6 +3,7 @@ package metrics
 import (
 	"bytes"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -41,4 +42,23 @@ func TestRegistry_MetricsCollection(t *testing.T) {
 	require.Contains(t, output, `telego_bots_total 4`)
 	require.True(t, strings.Contains(output, "go_goroutines"))
 	require.True(t, strings.Contains(output, "go_memstats_alloc_bytes"))
+}
+
+func TestRegistry_ObserveDurationConcurrentFirstUse(t *testing.T) {
+	r := NewRegistry()
+	const workers = 64
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			r.ObserveDuration("getMe", time.Millisecond)
+		}()
+	}
+	wg.Wait()
+
+	var buf bytes.Buffer
+	r.WritePrometheus(&buf, 0, 0, 0)
+	require.Contains(t, buf.String(), `telego_request_duration_seconds_count{method="getMe"} 64`)
 }
