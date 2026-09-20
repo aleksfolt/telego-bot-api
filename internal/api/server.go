@@ -629,7 +629,10 @@ func (s *Server) handleSetWebhook(ctx *fasthttp.RequestCtx, bot *botmanager.BotI
 
 func (s *Server) handleDeleteWebhook(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
 	var req converter.DeleteWebhookRequest
-	_ = bindRequest(ctx, &req)
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
 	if err := bot.DeleteWebhook(context.Background(), req.DropPendingUpdates); err != nil {
 		s.respondError(ctx, 500, "Failed to delete webhook: "+err.Error())
 		return
@@ -654,7 +657,10 @@ func (s *Server) handleGetUpdates(ctx *fasthttp.RequestCtx, bot *botmanager.BotI
 	}
 
 	var req converter.GetUpdatesRequest
-	_ = bindRequest(ctx, &req)
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
 
 	timeout := req.Timeout
 	if timeout == 0 && ctx.QueryArgs().Has("timeout") {
