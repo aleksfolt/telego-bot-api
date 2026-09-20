@@ -1184,6 +1184,28 @@ func (b *BotInstance) DeleteMessage(ctx context.Context, req *converter.DeleteMe
 	return true, nil
 }
 
+// DeleteBusinessMessages deletes messages on behalf of a connected business account.
+func (b *BotInstance) DeleteBusinessMessages(ctx context.Context, connectionID string, messageIDs []int64) (bool, error) {
+	if connectionID == "" {
+		return false, fmt.Errorf("business_connection_id is required")
+	}
+	if len(messageIDs) == 0 || len(messageIDs) > 100 {
+		return false, fmt.Errorf("message_ids must contain between 1 and 100 IDs")
+	}
+	ids := make([]int, len(messageIDs))
+	for i, id := range messageIDs {
+		if id <= 0 {
+			return false, fmt.Errorf("message_ids must contain positive IDs")
+		}
+		ids[i] = int(id)
+	}
+	var affected tg.MessagesAffectedMessages
+	if err := b.invokeBusiness(ctx, connectionID, &tg.MessagesDeleteMessagesRequest{Revoke: true, ID: ids}, &affected); err != nil {
+		return false, fmt.Errorf("mtproto business delete messages: %w", err)
+	}
+	return true, nil
+}
+
 // SendChatAction sends a chat action (typing, upload_photo, etc.).
 func (b *BotInstance) SendChatAction(ctx context.Context, req *converter.SendChatActionRequest) (bool, error) {
 	peer, err := b.resolvePeer(req.ChatID)

@@ -91,6 +91,21 @@ func TestDeliveryRegressionBusinessDeleteDecodesSuccess(t *testing.T) {
 	require.True(t, ok)
 }
 
+func TestDeliveryRegressionBusinessDeleteMessagesUsesAllIDs(t *testing.T) {
+	b := mediaTestBot(func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
+		wrapped := input.(*tg.InvokeWithBusinessConnectionRequest)
+		request, ok := wrapped.Query.(*tg.MessagesDeleteMessagesRequest)
+		require.True(t, ok)
+		require.Equal(t, []int{42, 43}, request.ID)
+		require.True(t, request.Revoke)
+		output.(*tg.MessagesAffectedMessages).Pts = 100
+		return nil
+	})
+	ok, err := b.DeleteBusinessMessages(context.Background(), "business-test", []int64{42, 43})
+	require.NoError(t, err)
+	require.True(t, ok)
+}
+
 func TestDeliveryRegressionWebhookAckKeepsUndeliveredUpdate(t *testing.T) {
 	b := deliveryTestBot(t, 803)
 	ctx := context.Background()
