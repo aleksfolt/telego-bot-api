@@ -158,6 +158,17 @@ type retryMiddleware struct {
 	logger *zap.Logger
 }
 
+func isTransientMTProtoError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "engine forcibly closed") ||
+		strings.Contains(errStr, "connection closed") ||
+		strings.Contains(errStr, "connection reset") ||
+		strings.Contains(errStr, "broken pipe")
+}
+
 func (m retryMiddleware) Handle(next tg.Invoker) telegram.InvokeFunc {
 	return func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
 		var err error
@@ -170,15 +181,15 @@ func (m retryMiddleware) Handle(next tg.Invoker) telegram.InvokeFunc {
 				return err
 			}
 			errStr := err.Error()
-			if strings.Contains(errStr, "engine forcibly closed") ||
-				strings.Contains(errStr, "connection closed") ||
-				strings.Contains(errStr, "connection reset") ||
-				strings.Contains(errStr, "broken pipe") {
+			if isTransientMTProtoError(err) {
 				if m.logger != nil {
 					m.logger.Warn("Transient MTProto network drop, retrying request",
 						zap.Int("attempt", attempt+1),
 						zap.String("error", errStr),
 					)
+				}
+				if attempt == 2 {
+					return err
 				}
 				select {
 				case <-ctx.Done():
@@ -1061,13 +1072,14 @@ func (b *BotInstance) SendMessage(ctx context.Context, req *converter.SendMessag
 	}
 
 	return &converter.Message{
-		MessageID:   msgID,
-		From:        b.GetMe(),
-		Chat:        converter.Chat{ID: req.ChatID},
-		Date:        int(time.Now().Unix()),
-		Text:        text,
-		Entities:    req.Entities,
-		ReplyMarkup: botApiMarkup,
+		MessageID:            msgID,
+		From:                 b.GetMe(),
+		Chat:                 converter.Chat{ID: req.ChatID},
+		Date:                 int(time.Now().Unix()),
+		Text:                 text,
+		Entities:             req.Entities,
+		ReplyMarkup:          botApiMarkup,
+		BusinessConnectionID: req.BusinessConnectionID,
 	}, nil
 }
 
@@ -1121,12 +1133,13 @@ func (b *BotInstance) EditMessageText(ctx context.Context, req *converter.EditMe
 	}
 
 	return &converter.Message{
-		MessageID: req.MessageID,
-		From:      b.GetMe(),
-		Chat:      converter.Chat{ID: req.ChatID},
-		Date:      int(time.Now().Unix()),
-		Text:      text,
-		Entities:  req.Entities,
+		MessageID:            req.MessageID,
+		From:                 b.GetMe(),
+		Chat:                 converter.Chat{ID: req.ChatID},
+		Date:                 int(time.Now().Unix()),
+		Text:                 text,
+		Entities:             req.Entities,
+		BusinessConnectionID: req.BusinessConnectionID,
 	}, nil
 }
 
@@ -1338,11 +1351,12 @@ func (b *BotInstance) EditMessageCaption(ctx context.Context, req *converter.Edi
 	}
 
 	return &converter.Message{
-		MessageID: req.MessageID,
-		From:      b.GetMe(),
-		Chat:      converter.Chat{ID: req.ChatID},
-		Date:      int(time.Now().Unix()),
-		Caption:   caption,
+		MessageID:            req.MessageID,
+		From:                 b.GetMe(),
+		Chat:                 converter.Chat{ID: req.ChatID},
+		Date:                 int(time.Now().Unix()),
+		Caption:              caption,
+		BusinessConnectionID: req.BusinessConnectionID,
 	}, nil
 }
 
@@ -1375,10 +1389,11 @@ func (b *BotInstance) EditMessageReplyMarkup(ctx context.Context, req *converter
 	}
 
 	return &converter.Message{
-		MessageID: req.MessageID,
-		From:      b.GetMe(),
-		Chat:      converter.Chat{ID: req.ChatID},
-		Date:      int(time.Now().Unix()),
+		MessageID:            req.MessageID,
+		From:                 b.GetMe(),
+		Chat:                 converter.Chat{ID: req.ChatID},
+		Date:                 int(time.Now().Unix()),
+		BusinessConnectionID: req.BusinessConnectionID,
 	}, nil
 }
 
@@ -1455,11 +1470,12 @@ func (b *BotInstance) EditMessageMedia(ctx context.Context, req *converter.EditM
 	}
 
 	return &converter.Message{
-		MessageID: req.MessageID,
-		From:      b.GetMe(),
-		Chat:      converter.Chat{ID: req.ChatID},
-		Date:      int(time.Now().Unix()),
-		Caption:   editReq.Message,
+		MessageID:            req.MessageID,
+		From:                 b.GetMe(),
+		Chat:                 converter.Chat{ID: req.ChatID},
+		Date:                 int(time.Now().Unix()),
+		Caption:              editReq.Message,
+		BusinessConnectionID: req.BusinessConnectionID,
 	}, nil
 }
 
@@ -1938,12 +1954,13 @@ func (b *BotInstance) SendVideo(ctx context.Context, req *converter.SendVideoReq
 	}
 
 	return &converter.Message{
-		MessageID: msgID,
-		From:      b.GetMe(),
-		Chat:      converter.Chat{ID: req.ChatID},
-		Date:      int(time.Now().Unix()),
-		Caption:   caption,
-		Video:     video,
+		MessageID:            msgID,
+		From:                 b.GetMe(),
+		Chat:                 converter.Chat{ID: req.ChatID},
+		Date:                 int(time.Now().Unix()),
+		Caption:              caption,
+		Video:                video,
+		BusinessConnectionID: req.BusinessConnectionID,
 	}, nil
 }
 
@@ -2126,12 +2143,13 @@ func (b *BotInstance) SendDocument(ctx context.Context, req *converter.SendDocum
 	}
 
 	return &converter.Message{
-		MessageID: msgID,
-		From:      b.GetMe(),
-		Chat:      converter.Chat{ID: req.ChatID},
-		Date:      int(time.Now().Unix()),
-		Caption:   caption,
-		Document:  document,
+		MessageID:            msgID,
+		From:                 b.GetMe(),
+		Chat:                 converter.Chat{ID: req.ChatID},
+		Date:                 int(time.Now().Unix()),
+		Caption:              caption,
+		Document:             document,
+		BusinessConnectionID: req.BusinessConnectionID,
 	}, nil
 }
 
@@ -2286,12 +2304,13 @@ func (b *BotInstance) SendVoice(ctx context.Context, req *converter.SendVoiceReq
 	}
 
 	return &converter.Message{
-		MessageID: extractSentMessageID(updates),
-		From:      b.GetMe(),
-		Chat:      converter.Chat{ID: req.ChatID},
-		Date:      int(time.Now().Unix()),
-		Caption:   caption,
-		Voice:     voice,
+		MessageID:            extractSentMessageID(updates),
+		From:                 b.GetMe(),
+		Chat:                 converter.Chat{ID: req.ChatID},
+		Date:                 int(time.Now().Unix()),
+		Caption:              caption,
+		Voice:                voice,
+		BusinessConnectionID: req.BusinessConnectionID,
 	}, nil
 }
 
@@ -2444,11 +2463,12 @@ func (b *BotInstance) SendVideoNote(ctx context.Context, req *converter.SendVide
 	}
 
 	return &converter.Message{
-		MessageID: extractSentMessageID(updates),
-		From:      b.GetMe(),
-		Chat:      converter.Chat{ID: req.ChatID},
-		Date:      int(time.Now().Unix()),
-		VideoNote: videoNote,
+		MessageID:            extractSentMessageID(updates),
+		From:                 b.GetMe(),
+		Chat:                 converter.Chat{ID: req.ChatID},
+		Date:                 int(time.Now().Unix()),
+		VideoNote:            videoNote,
+		BusinessConnectionID: req.BusinessConnectionID,
 	}, nil
 }
 
@@ -2897,12 +2917,13 @@ func (b *BotInstance) SendAudio(ctx context.Context, req *converter.SendAudioReq
 	}
 
 	return &converter.Message{
-		MessageID: extractSentMessageID(updates),
-		From:      b.GetMe(),
-		Chat:      converter.Chat{ID: req.ChatID},
-		Date:      int(time.Now().Unix()),
-		Caption:   caption,
-		Audio:     audio,
+		MessageID:            extractSentMessageID(updates),
+		From:                 b.GetMe(),
+		Chat:                 converter.Chat{ID: req.ChatID},
+		Date:                 int(time.Now().Unix()),
+		Caption:              caption,
+		Audio:                audio,
+		BusinessConnectionID: req.BusinessConnectionID,
 	}, nil
 }
 
@@ -3035,11 +3056,12 @@ func (b *BotInstance) SendSticker(ctx context.Context, req *converter.SendSticke
 	}
 
 	return &converter.Message{
-		MessageID: extractSentMessageID(updates),
-		From:      b.GetMe(),
-		Chat:      converter.Chat{ID: req.ChatID},
-		Date:      int(time.Now().Unix()),
-		Sticker:   sticker,
+		MessageID:            extractSentMessageID(updates),
+		From:                 b.GetMe(),
+		Chat:                 converter.Chat{ID: req.ChatID},
+		Date:                 int(time.Now().Unix()),
+		Sticker:              sticker,
+		BusinessConnectionID: req.BusinessConnectionID,
 	}, nil
 }
 
@@ -3232,12 +3254,13 @@ func (b *BotInstance) SendAnimation(ctx context.Context, req *converter.SendAnim
 	}
 
 	return &converter.Message{
-		MessageID: msgID,
-		From:      b.GetMe(),
-		Chat:      converter.Chat{ID: req.ChatID},
-		Date:      int(time.Now().Unix()),
-		Caption:   caption,
-		Animation: animation,
+		MessageID:            msgID,
+		From:                 b.GetMe(),
+		Chat:                 converter.Chat{ID: req.ChatID},
+		Date:                 int(time.Now().Unix()),
+		Caption:              caption,
+		Animation:            animation,
+		BusinessConnectionID: req.BusinessConnectionID,
 	}, nil
 }
 
@@ -3893,27 +3916,7 @@ func (b *BotInstance) PostStory(ctx context.Context, req *converter.PostStoryReq
 	if err := b.invokeBusinessDirect(ctx, req.BusinessConnectionID, request, &box); err != nil {
 		return nil, err
 	}
-	storyID := 0
-	switch updates := box.Updates.(type) {
-	case *tg.Updates:
-		for _, update := range updates.Updates {
-			switch value := update.(type) {
-			case *tg.UpdateStoryID:
-				storyID = value.ID
-			case *tg.UpdateStory:
-				storyID = value.Story.GetID()
-			}
-		}
-	case *tg.UpdatesCombined:
-		for _, update := range updates.Updates {
-			switch value := update.(type) {
-			case *tg.UpdateStoryID:
-				storyID = value.ID
-			case *tg.UpdateStory:
-				storyID = value.Story.GetID()
-			}
-		}
-	}
+	storyID := extractStoryID(box.Updates)
 	if storyID == 0 {
 		return nil, fmt.Errorf("story sent without story id")
 	}

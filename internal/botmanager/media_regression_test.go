@@ -218,6 +218,7 @@ func TestRegressionMediaNotificationSettings(t *testing.T) {
 					msg, err := send(b, silent, conn)
 					require.NoError(t, err)
 					require.Equal(t, int64(42), msg.MessageID)
+					require.Equal(t, conn, msg.BusinessConnectionID)
 					require.Equal(t, 1, calls)
 				})
 			}

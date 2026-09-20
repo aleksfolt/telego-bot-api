@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"io"
+	"strings"
 	"time"
 
 	"telego-bot-api/internal/botmanager"
@@ -2269,16 +2271,36 @@ func (s *Server) handleSetBusinessAccountProfilePhoto(ctx *fasthttp.RequestCtx, 
 		s.respondError(ctx, 400, "Bad Request: "+err.Error())
 		return
 	}
-	if mf, err := ctx.MultipartForm(); err == nil && mf != nil {
-		if headers := mf.File["photo"]; len(headers) > 0 {
-			if f, err := headers[0].Open(); err == nil {
-				data, _ := io.ReadAll(f)
-				_ = f.Close()
-				req.PhotoData = data
-			}
+	var photo converter.InputProfilePhoto
+	if len(req.Photo) != 0 {
+		if err := json.Unmarshal(req.Photo, &photo); err != nil {
+			s.respondError(ctx, 400, "Bad Request: invalid profile photo: "+err.Error())
+			return
 		}
 	}
-	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	fieldName, fieldValue := "photo", photo.Photo
+	if photo.Type == "animated" {
+		fieldName, fieldValue = "animation", photo.Animation
+	}
+	if data, filename := ExtractFileFromRequest(ctx, fieldName, fieldValue); len(data) > 0 {
+		req.PhotoData = data
+		req.PhotoFileName = filename
+	}
+	req.PhotoType = photo.Type
+	req.MainFrameTimestamp = photo.MainFrameTimestamp
+	if req.PhotoType == "" && len(req.PhotoData) > 0 {
+		// Backward compatibility with clients that upload a direct `photo` part.
+		req.PhotoType = "static"
+	}
+	if req.PhotoType != "static" && req.PhotoType != "animated" {
+		s.respondError(ctx, 400, "Bad Request: profile photo type must be static or animated")
+		return
+	}
+	if len(req.PhotoData) == 0 || strings.TrimSpace(req.BusinessConnectionID) == "" {
+		s.respondError(ctx, 400, "Bad Request: business_connection_id and a new profile photo upload are required")
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	ok, err := bot.SetBusinessAccountProfilePhoto(c, &req)
 	if err != nil {
@@ -2640,5 +2662,3 @@ func (s *Server) handleDeleteEphemeralMessage(ctx *fasthttp.RequestCtx, bot *bot
 	}
 	s.respondOK(ctx, ok)
 }
-
-

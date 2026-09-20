@@ -1,6 +1,10 @@
 package botmanager
 
-import "github.com/gotd/td/tg"
+import (
+	"telego-bot-api/internal/converter"
+
+	"github.com/gotd/td/tg"
+)
 
 // unpackUpdates normalizes the containers returned by send and edit RPCs.
 func unpackUpdates(updates tg.UpdatesClass) ([]tg.UpdateClass, []tg.UserClass, []tg.ChatClass) {
@@ -80,4 +84,34 @@ func documentFromMedia(media tg.MessageMediaClass) *tg.Document {
 		return doc
 	}
 	return nil
+}
+
+func extractPollFromUpdates(updates tg.UpdatesClass) *converter.Poll {
+	if u, ok := updates.(*tg.UpdateShortSentMessage); ok {
+		if media, ok := u.Media.(*tg.MessageMediaPoll); ok {
+			return converter.ConvertPoll(media.Poll, media.Results)
+		}
+	}
+	list, _, _ := unpackUpdates(updates)
+	for _, update := range list {
+		if msg := messageFromUpdate(update); msg != nil {
+			if media, ok := msg.Media.(*tg.MessageMediaPoll); ok {
+				return converter.ConvertPoll(media.Poll, media.Results)
+			}
+		}
+	}
+	return nil
+}
+
+func extractStoryID(updates tg.UpdatesClass) int {
+	list, _, _ := unpackUpdates(updates)
+	for _, update := range list {
+		switch value := update.(type) {
+		case *tg.UpdateStoryID:
+			return value.ID
+		case *tg.UpdateStory:
+			return value.Story.GetID()
+		}
+	}
+	return 0
 }
