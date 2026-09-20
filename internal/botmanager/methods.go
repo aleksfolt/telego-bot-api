@@ -2487,7 +2487,7 @@ func (b *BotInstance) GetAvailableGifts(ctx context.Context) (interface{}, error
 	}
 	value, ok := result.(*tg.PaymentsStarGifts)
 	if !ok {
-		return map[string]interface{}{"gifts": []interface{}{}}, nil
+		return nil, fmt.Errorf("getAvailableGifts returned unexpected response %T", result)
 	}
 	gifts := make([]interface{}, 0, len(value.Gifts))
 	for _, class := range value.Gifts {
