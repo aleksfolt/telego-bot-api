@@ -3172,35 +3172,32 @@ func (b *BotInstance) SetChatMemberTag(ctx context.Context, req *converter.SetCh
 
 // GetUserProfileAudios returns profile audios for a user.
 func (b *BotInstance) GetUserProfileAudios(ctx context.Context, userID int64, offset, limit int) (*converter.UserProfileAudios, error) {
-	return &converter.UserProfileAudios{
-		TotalCount: 0,
-		Audios:     []converter.Message{},
-	}, nil
+	return nil, fmt.Errorf("getUserProfileAudios is not implemented")
 }
 
 // AnswerChatJoinRequestQuery answers a chat join request query.
 func (b *BotInstance) AnswerChatJoinRequestQuery(ctx context.Context, req *converter.AnswerChatJoinRequestQueryRequest) (bool, error) {
-	return true, nil
+	return false, fmt.Errorf("answerChatJoinRequestQuery is not implemented")
 }
 
 // SendChatJoinRequestWebApp sends a web app url for a chat join request query.
 func (b *BotInstance) SendChatJoinRequestWebApp(ctx context.Context, req *converter.SendChatJoinRequestWebAppRequest) (bool, error) {
-	return true, nil
+	return false, fmt.Errorf("sendChatJoinRequestWebApp is not implemented")
 }
 
 // AnswerCustomQuery answers a custom query.
 func (b *BotInstance) AnswerCustomQuery(ctx context.Context, req *converter.AnswerCustomQueryRequest) (bool, error) {
-	return true, nil
+	return false, fmt.Errorf("answerCustomQuery is not implemented")
 }
 
 // SendCustomRequest sends a custom MTProto request.
 func (b *BotInstance) SendCustomRequest(ctx context.Context, req *converter.SendCustomRequestRequest) (interface{}, error) {
-	return map[string]interface{}{"ok": true}, nil
+	return nil, fmt.Errorf("sendCustomRequest is not implemented")
 }
 
 // AnswerGuestQuery answers a guest query.
 func (b *BotInstance) AnswerGuestQuery(ctx context.Context, req *converter.AnswerGuestQueryRequest) (bool, error) {
-	return true, nil
+	return false, fmt.Errorf("answerGuestQuery is not implemented")
 }
 
 // ApproveSuggestedPost approves a suggested post in a channel.
@@ -3341,6 +3338,9 @@ func (b *BotInstance) GetChatGifts(ctx context.Context, req *converter.GetChatGi
 	if err != nil {
 		return nil, err
 	}
+	if res.Count > 0 {
+		return nil, fmt.Errorf("getChatGifts returned %d gifts, but gift conversion is not implemented", res.Count)
+	}
 	return &converter.UserGifts{TotalCount: res.Count, Gifts: []converter.OwnedGift{}}, nil
 }
 
@@ -3366,6 +3366,9 @@ func (b *BotInstance) GetUserGifts(ctx context.Context, req *converter.GetUserGi
 	})
 	if err != nil {
 		return nil, err
+	}
+	if res.Count > 0 {
+		return nil, fmt.Errorf("getUserGifts returned %d gifts, but gift conversion is not implemented", res.Count)
 	}
 	return &converter.UserGifts{TotalCount: res.Count, Gifts: []converter.OwnedGift{}}, nil
 }
@@ -3399,6 +3402,9 @@ func (b *BotInstance) GetBusinessAccountGifts(ctx context.Context, req *converte
 	}, &res)
 	if err != nil {
 		return nil, err
+	}
+	if res.Count > 0 {
+		return nil, fmt.Errorf("getBusinessAccountGifts returned %d gifts, but gift conversion is not implemented", res.Count)
 	}
 	return &converter.UserGifts{TotalCount: res.Count, Gifts: []converter.OwnedGift{}}, nil
 }
@@ -3504,26 +3510,22 @@ func (b *BotInstance) SetBusinessAccountProfilePhoto(ctx context.Context, req *c
 
 // GetManagedBotToken returns the token of a managed bot.
 func (b *BotInstance) GetManagedBotToken(ctx context.Context, userID int64) (string, error) {
-	return b.token, nil
+	return "", fmt.Errorf("getManagedBotToken is not implemented")
 }
 
 // GetManagedBotAccessSettings returns access settings of a managed bot.
 func (b *BotInstance) GetManagedBotAccessSettings(ctx context.Context, userID int64) (*converter.ManagedBotAccessSettings, error) {
-	return &converter.ManagedBotAccessSettings{
-		CanManageBot:       true,
-		IsAccessRestricted: false,
-		AddedUserIDs:       []int64{},
-	}, nil
+	return nil, fmt.Errorf("getManagedBotAccessSettings is not implemented")
 }
 
 // SetManagedBotAccessSettings updates access settings of a managed bot.
 func (b *BotInstance) SetManagedBotAccessSettings(ctx context.Context, req *converter.SetManagedBotAccessSettingsRequest) (bool, error) {
-	return true, nil
+	return false, fmt.Errorf("setManagedBotAccessSettings is not implemented")
 }
 
 // ReplaceManagedBotToken replaces token of a managed bot.
 func (b *BotInstance) ReplaceManagedBotToken(ctx context.Context, userID int64) (string, error) {
-	return b.token, nil
+	return "", fmt.Errorf("replaceManagedBotToken is not implemented")
 }
 
 // GetUserPersonalChatMessages returns messages from personal chat with a user.
@@ -3571,7 +3573,7 @@ func (b *BotInstance) GetUserPersonalChatMessages(ctx context.Context, userID in
 
 // GiftPremiumSubscription gifts Telegram Premium subscription to a user.
 func (b *BotInstance) GiftPremiumSubscription(ctx context.Context, req *converter.GiftPremiumSubscriptionRequest) (bool, error) {
-	return true, nil
+	return false, fmt.Errorf("giftPremiumSubscription is not implemented; refusing to report a false success")
 }
 
 // EditUserStarSubscription edits or cancels a star subscription.
@@ -3656,10 +3658,7 @@ func (b *BotInstance) EditStory(ctx context.Context, req *converter.EditStoryReq
 
 // SavePreparedKeyboardButton generates and saves a prepared keyboard button.
 func (b *BotInstance) SavePreparedKeyboardButton(ctx context.Context, req *converter.SavePreparedKeyboardButtonRequest) (*converter.PreparedKeyboardButton, error) {
-	randBytes := make([]byte, 16)
-	_, _ = rand.Read(randBytes)
-	id := fmt.Sprintf("%x", randBytes)
-	return &converter.PreparedKeyboardButton{ID: id}, nil
+	return nil, fmt.Errorf("savePreparedKeyboardButton is not implemented")
 }
 
 // SendLivePhoto sends a live photo.
@@ -3709,61 +3708,45 @@ func (b *BotInstance) SendMessageDraft(ctx context.Context, req *converter.SendM
 
 // SendRichMessageDraft saves a rich message draft.
 func (b *BotInstance) SendRichMessageDraft(ctx context.Context, req *converter.SendRichMessageDraftRequest) (bool, error) {
-	return true, nil
+	return false, fmt.Errorf("sendRichMessageDraft is not implemented")
 }
 
 // SendRichMessage sends a rich message.
 func (b *BotInstance) SendRichMessage(ctx context.Context, req *converter.SendRichMessageRequest) (*converter.Message, error) {
-	return b.SendMessage(ctx, &converter.SendMessageRequest{
-		BusinessConnectionID: req.BusinessConnectionID,
-		ChatID:               req.ChatID,
-		MessageThreadID:      req.MessageThreadID,
-		Text:                 string(req.RichMessage),
-	})
+	return nil, fmt.Errorf("sendRichMessage is not implemented")
 }
 
 // SendChecklist sends a checklist message.
 func (b *BotInstance) SendChecklist(ctx context.Context, req *converter.SendChecklistRequest) (*converter.Message, error) {
-	return b.SendMessage(ctx, &converter.SendMessageRequest{
-		BusinessConnectionID: req.BusinessConnectionID,
-		ChatID:               req.ChatID,
-		MessageThreadID:      req.MessageThreadID,
-		Text:                 "Checklist",
-		ReplyMarkup:          req.ReplyMarkup,
-	})
+	return nil, fmt.Errorf("sendChecklist is not implemented")
 }
 
 // EditMessageChecklist edits a checklist message.
 func (b *BotInstance) EditMessageChecklist(ctx context.Context, req *converter.EditMessageChecklistRequest) (interface{}, error) {
-	return b.EditMessageReplyMarkup(ctx, &converter.EditMessageReplyMarkupRequest{
-		BusinessConnectionID: req.BusinessConnectionID,
-		ChatID:               req.ChatID,
-		MessageID:            req.MessageID,
-		ReplyMarkup:          req.ReplyMarkup,
-	})
+	return nil, fmt.Errorf("editMessageChecklist is not implemented")
 }
 
 // EditEphemeralMessageText edits text of an ephemeral message.
 func (b *BotInstance) EditEphemeralMessageText(ctx context.Context, req *converter.EditEphemeralMessageTextRequest) (bool, error) {
-	return true, nil
+	return false, fmt.Errorf("editEphemeralMessageText is not implemented")
 }
 
 // EditEphemeralMessageMedia edits media of an ephemeral message.
 func (b *BotInstance) EditEphemeralMessageMedia(ctx context.Context, req *converter.EditEphemeralMessageMediaRequest) (bool, error) {
-	return true, nil
+	return false, fmt.Errorf("editEphemeralMessageMedia is not implemented")
 }
 
 // EditEphemeralMessageCaption edits caption of an ephemeral message.
 func (b *BotInstance) EditEphemeralMessageCaption(ctx context.Context, req *converter.EditEphemeralMessageCaptionRequest) (bool, error) {
-	return true, nil
+	return false, fmt.Errorf("editEphemeralMessageCaption is not implemented")
 }
 
 // EditEphemeralMessageReplyMarkup edits reply markup of an ephemeral message.
 func (b *BotInstance) EditEphemeralMessageReplyMarkup(ctx context.Context, req *converter.EditEphemeralMessageReplyMarkupRequest) (bool, error) {
-	return true, nil
+	return false, fmt.Errorf("editEphemeralMessageReplyMarkup is not implemented")
 }
 
 // DeleteEphemeralMessage deletes an ephemeral message.
 func (b *BotInstance) DeleteEphemeralMessage(ctx context.Context, req *converter.DeleteEphemeralMessageRequest) (bool, error) {
-	return true, nil
+	return false, fmt.Errorf("deleteEphemeralMessage is not implemented")
 }
