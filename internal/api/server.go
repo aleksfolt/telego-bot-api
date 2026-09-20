@@ -1560,7 +1560,23 @@ func (s *Server) handleGetBusinessConnection(ctx *fasthttp.RequestCtx, bot *botm
 }
 
 func (s *Server) handleDeleteBusinessMessages(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
-	s.respondOK(ctx, true)
+	var req converter.DeleteMessagesRequest
+	if err := bindRequest(ctx, &req); err != nil {
+		s.respondError(ctx, 400, "Bad Request: invalid payload: "+err.Error())
+		return
+	}
+	if req.BusinessConnectionID == "" {
+		s.respondError(ctx, 400, "Bad Request: business_connection_id is required")
+		return
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := bot.DeleteBusinessMessages(c, req.BusinessConnectionID, req.MessageIDs)
+	if err != nil {
+		s.respondError(ctx, 400, "Bad Request: "+err.Error())
+		return
+	}
+	s.respondOK(ctx, ok)
 }
 
 func (s *Server) handleGetUserProfilePhotos(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {

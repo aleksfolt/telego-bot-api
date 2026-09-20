@@ -291,8 +291,9 @@ type CopyMessagesRequest struct {
 }
 
 type DeleteMessagesRequest struct {
-	ChatID     int64   `json:"chat_id"`
-	MessageIDs []int64 `json:"message_ids"`
+	BusinessConnectionID string  `json:"business_connection_id,omitempty"`
+	ChatID               int64   `json:"chat_id"`
+	MessageIDs           []int64 `json:"message_ids"`
 }
 
 type SetMessageReactionRequest struct {
