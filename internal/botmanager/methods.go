@@ -951,7 +951,8 @@ func (b *BotInstance) SendLocation(ctx context.Context, req *converter.SendLocat
 	if err != nil {
 		return nil, err
 	}
-	return &converter.Message{MessageID: extractSentMessageID(updates), From: b.GetMe(), Chat: converter.Chat{ID: req.ChatID}, Date: int(time.Now().Unix())}, nil
+	return &converter.Message{MessageID: extractSentMessageID(updates), From: b.GetMe(), Chat: converter.Chat{ID: req.ChatID},
+		Date: int(time.Now().Unix()), BusinessConnectionID: req.BusinessConnectionID}, nil
 }
 
 // EditMessageLiveLocation edits a live location message.
@@ -970,7 +971,8 @@ func (b *BotInstance) EditMessageLiveLocation(ctx context.Context, req *converte
 	if err := b.editMessageMedia(ctx, req.BusinessConnectionID, peer, req.MessageID, req.InlineMessageID, media, req.ReplyMarkup); err != nil {
 		return nil, err
 	}
-	return &converter.Message{MessageID: req.MessageID, From: b.GetMe(), Chat: converter.Chat{ID: req.ChatID}, Date: int(time.Now().Unix())}, nil
+	return &converter.Message{MessageID: req.MessageID, From: b.GetMe(), Chat: converter.Chat{ID: req.ChatID},
+		Date: int(time.Now().Unix()), BusinessConnectionID: req.BusinessConnectionID}, nil
 }
 
 // StopMessageLiveLocation stops updating a live location message.
@@ -987,7 +989,8 @@ func (b *BotInstance) StopMessageLiveLocation(ctx context.Context, req *converte
 	if err := b.editMessageMedia(ctx, req.BusinessConnectionID, peer, req.MessageID, req.InlineMessageID, media, req.ReplyMarkup); err != nil {
 		return nil, err
 	}
-	return &converter.Message{MessageID: req.MessageID, From: b.GetMe(), Chat: converter.Chat{ID: req.ChatID}, Date: int(time.Now().Unix())}, nil
+	return &converter.Message{MessageID: req.MessageID, From: b.GetMe(), Chat: converter.Chat{ID: req.ChatID},
+		Date: int(time.Now().Unix()), BusinessConnectionID: req.BusinessConnectionID}, nil
 }
 
 // SendVenue sends information about a venue.
@@ -1017,7 +1020,8 @@ func (b *BotInstance) SendVenue(ctx context.Context, req *converter.SendVenueReq
 	if err != nil {
 		return nil, err
 	}
-	return &converter.Message{MessageID: extractSentMessageID(updates), From: b.GetMe(), Chat: converter.Chat{ID: req.ChatID}, Date: int(time.Now().Unix())}, nil
+	return &converter.Message{MessageID: extractSentMessageID(updates), From: b.GetMe(), Chat: converter.Chat{ID: req.ChatID},
+		Date: int(time.Now().Unix()), BusinessConnectionID: req.BusinessConnectionID}, nil
 }
 
 // SendContact sends phone contacts.
@@ -1039,7 +1043,8 @@ func (b *BotInstance) SendContact(ctx context.Context, req *converter.SendContac
 	if err != nil {
 		return nil, err
 	}
-	return &converter.Message{MessageID: extractSentMessageID(updates), From: b.GetMe(), Chat: converter.Chat{ID: req.ChatID}, Date: int(time.Now().Unix())}, nil
+	return &converter.Message{MessageID: extractSentMessageID(updates), From: b.GetMe(), Chat: converter.Chat{ID: req.ChatID},
+		Date: int(time.Now().Unix()), BusinessConnectionID: req.BusinessConnectionID}, nil
 }
 
 // SendPoll sends a native poll.
@@ -1100,7 +1105,8 @@ func (b *BotInstance) SendPoll(ctx context.Context, req *converter.SendPollReque
 	if err != nil {
 		return nil, err
 	}
-	return &converter.Message{MessageID: extractSentMessageID(updates), From: b.GetMe(), Chat: converter.Chat{ID: req.ChatID}, Date: int(time.Now().Unix())}, nil
+	return &converter.Message{MessageID: extractSentMessageID(updates), From: b.GetMe(), Chat: converter.Chat{ID: req.ChatID},
+		Date: int(time.Now().Unix()), BusinessConnectionID: req.BusinessConnectionID}, nil
 }
 
 // StopPoll stops a poll.
@@ -1109,6 +1115,30 @@ func (b *BotInstance) StopPoll(ctx context.Context, req *converter.StopPollReque
 	if err != nil {
 		return nil, err
 	}
+	if req.BusinessConnectionID != "" {
+		// Business messages can't be fetched through the bot's ordinary message
+		// history. Telegram accepts an empty closed poll as the edit marker and
+		// returns the complete stopped poll in the business edit update.
+		poll := tg.Poll{Closed: true, Question: tg.TextWithEntities{}, Answers: []tg.PollAnswerClass{}}
+		edit := &tg.MessagesEditMessageRequest{Peer: peer, ID: int(req.MessageID)}
+		edit.SetMedia(&tg.InputMediaPoll{Poll: poll})
+		if len(req.ReplyMarkup) != 0 {
+			markup, err := converter.ParseReplyMarkup(req.ReplyMarkup)
+			if err != nil {
+				return nil, err
+			}
+			edit.SetReplyMarkup(markup)
+		}
+		var box tg.UpdatesBox
+		if err := b.invokeBusiness(ctx, req.BusinessConnectionID, edit, &box); err != nil {
+			return nil, err
+		}
+		if stopped := extractPollFromUpdates(box.Updates); stopped != nil {
+			return stopped, nil
+		}
+		return nil, fmt.Errorf("business stop poll response did not contain a poll")
+	}
+
 	ids := []tg.InputMessageClass{&tg.InputMessageID{ID: int(req.MessageID)}}
 	var history tg.MessagesMessagesClass
 	if channelPeer, ok := peer.(*tg.InputPeerChannel); ok {
@@ -1149,12 +1179,7 @@ func (b *BotInstance) StopPoll(ctx context.Context, req *converter.StopPollReque
 		}
 		edit.SetReplyMarkup(markup)
 	}
-	if req.BusinessConnectionID != "" {
-		var box tg.UpdatesBox
-		err = b.invokeBusiness(ctx, req.BusinessConnectionID, edit, &box)
-	} else {
-		_, err = b.raw.MessagesEditMessage(ctx, edit)
-	}
+	_, err = b.raw.MessagesEditMessage(ctx, edit)
 	if err != nil {
 		return nil, err
 	}
@@ -1182,7 +1207,8 @@ func (b *BotInstance) SendDice(ctx context.Context, req *converter.SendDiceReque
 	if err != nil {
 		return nil, err
 	}
-	return &converter.Message{MessageID: extractSentMessageID(updates), From: b.GetMe(), Chat: converter.Chat{ID: req.ChatID}, Date: int(time.Now().Unix())}, nil
+	return &converter.Message{MessageID: extractSentMessageID(updates), From: b.GetMe(), Chat: converter.Chat{ID: req.ChatID},
+		Date: int(time.Now().Unix()), BusinessConnectionID: req.BusinessConnectionID}, nil
 }
 
 // PinChatMessage pins a message in a chat.
@@ -2289,6 +2315,13 @@ func (b *BotInstance) CreateInvoiceLink(ctx context.Context, req *converter.Crea
 	if err != nil {
 		return "", err
 	}
+	if req.BusinessConnectionID != "" {
+		var result tg.PaymentsExportedInvoice
+		if err := b.invokeBusiness(ctx, req.BusinessConnectionID, &tg.PaymentsExportInvoiceRequest{InvoiceMedia: media}, &result); err != nil {
+			return "", err
+		}
+		return result.URL, nil
+	}
 	result, err := b.raw.PaymentsExportInvoice(ctx, media)
 	if err != nil {
 		return "", err
@@ -2388,7 +2421,8 @@ func (b *BotInstance) SendPaidMedia(ctx context.Context, req *converter.SendPaid
 		return nil, err
 	}
 	return &converter.Message{MessageID: extractSentMessageID(updates), From: b.GetMe(),
-		Chat: converter.Chat{ID: req.ChatID}, Date: int(time.Now().Unix()), Caption: caption}, nil
+		Chat: converter.Chat{ID: req.ChatID}, Date: int(time.Now().Unix()), Caption: caption,
+		BusinessConnectionID: req.BusinessConnectionID}, nil
 }
 
 // RefundStarPayment refunds a Telegram Star payment.
@@ -2795,12 +2829,20 @@ func (b *BotInstance) SendGame(ctx context.Context, req *converter.SendGameReque
 	}
 	randomID, _ := rand.Int(rand.Reader, big.NewInt(1<<62))
 	send.RandomID = randomID.Int64()
-	updates, err := b.raw.MessagesSendMedia(ctx, send)
+	if len(req.ReplyMarkup) != 0 {
+		markup, err := converter.ParseReplyMarkup(req.ReplyMarkup)
+		if err != nil {
+			return nil, err
+		}
+		send.SetReplyMarkup(markup)
+	}
+	updates, err := b.sendMedia(ctx, req.BusinessConnectionID, send)
 	if err != nil {
 		return nil, err
 	}
 	return &converter.Message{MessageID: extractSentMessageID(updates), From: b.GetMe(),
-		Chat: converter.Chat{ID: req.ChatID}, Date: int(time.Now().Unix())}, nil
+		Chat: converter.Chat{ID: req.ChatID}, Date: int(time.Now().Unix()),
+		BusinessConnectionID: req.BusinessConnectionID}, nil
 }
 
 // SetGameScore sets the score of the specified user in a game.
@@ -3229,17 +3271,27 @@ func (b *BotInstance) UpgradeGift(ctx context.Context, req *converter.UpgradeGif
 		Stargift:            giftInput,
 		KeepOriginalDetails: req.KeepOriginalDetails,
 	}
+	if req.StarCount > 0 {
+		return nil, fmt.Errorf("paid gift upgrades are not implemented; refusing to report a false success")
+	}
 	if req.BusinessConnectionID != "" {
 		var updates tg.UpdatesBox
-		_ = b.invokeBusiness(ctx, req.BusinessConnectionID, upgradeReq, &updates)
+		if err := b.invokeBusiness(ctx, req.BusinessConnectionID, upgradeReq, &updates); err != nil {
+			return nil, err
+		}
 	} else {
-		_, _ = b.raw.PaymentsUpgradeStarGift(ctx, upgradeReq)
+		if _, err := b.raw.PaymentsUpgradeStarGift(ctx, upgradeReq); err != nil {
+			return nil, err
+		}
 	}
 	return map[string]interface{}{"ok": true}, nil
 }
 
 // TransferGift transfers an owned star gift to another user or channel.
 func (b *BotInstance) TransferGift(ctx context.Context, req *converter.TransferGiftRequest) (bool, error) {
+	if req.StarCount > 0 {
+		return false, fmt.Errorf("paid gift transfers are not implemented; refusing to report a false success")
+	}
 	msgID, _ := strconv.Atoi(req.OwnedGiftID)
 	var giftInput tg.InputSavedStarGiftClass = &tg.InputSavedStarGiftUser{MsgID: msgID}
 	if req.OwnedGiftID != "" && msgID == 0 {
@@ -3287,7 +3339,7 @@ func (b *BotInstance) GetChatGifts(ctx context.Context, req *converter.GetChatGi
 		Limit:               limit,
 	})
 	if err != nil {
-		return &converter.UserGifts{TotalCount: 0, Gifts: []converter.OwnedGift{}}, nil
+		return nil, err
 	}
 	return &converter.UserGifts{TotalCount: res.Count, Gifts: []converter.OwnedGift{}}, nil
 }
@@ -3313,7 +3365,7 @@ func (b *BotInstance) GetUserGifts(ctx context.Context, req *converter.GetUserGi
 		Limit:               limit,
 	})
 	if err != nil {
-		return &converter.UserGifts{TotalCount: 0, Gifts: []converter.OwnedGift{}}, nil
+		return nil, err
 	}
 	return &converter.UserGifts{TotalCount: res.Count, Gifts: []converter.OwnedGift{}}, nil
 }
@@ -3346,17 +3398,25 @@ func (b *BotInstance) GetBusinessAccountGifts(ctx context.Context, req *converte
 		Limit:               limit,
 	}, &res)
 	if err != nil {
-		return &converter.UserGifts{TotalCount: 0, Gifts: []converter.OwnedGift{}}, nil
+		return nil, err
 	}
 	return &converter.UserGifts{TotalCount: res.Count, Gifts: []converter.OwnedGift{}}, nil
 }
 
 // GetBusinessAccountStarBalance returns the Star balance of a connected business account.
 func (b *BotInstance) GetBusinessAccountStarBalance(ctx context.Context, businessConnectionID string) (*converter.StarAmount, error) {
-	var res tg.PaymentsStarsStatus
-	err := b.invokeBusiness(ctx, businessConnectionID, &tg.PaymentsGetStarsStatusRequest{Peer: &tg.InputPeerSelf{}}, &res)
+	connection, err := b.GetBusinessConnection(ctx, businessConnectionID)
 	if err != nil {
-		return &converter.StarAmount{Amount: 0, NanostarAmount: 0}, nil
+		return nil, err
+	}
+	peer, err := b.resolvePeer(connection.UserChatID)
+	if err != nil {
+		return nil, err
+	}
+	var res tg.PaymentsStarsStatus
+	err = b.invokeBusiness(ctx, businessConnectionID, &tg.PaymentsGetStarsStatusRequest{Peer: peer}, &res)
+	if err != nil {
+		return nil, err
 	}
 	var amount int64
 	var nanos int
@@ -3372,16 +3432,73 @@ func (b *BotInstance) GetBusinessAccountStarBalance(ctx context.Context, busines
 
 // TransferBusinessAccountStars transfers Stars from a business account.
 func (b *BotInstance) TransferBusinessAccountStars(ctx context.Context, req *converter.TransferBusinessAccountStarsRequest) (bool, error) {
-	return true, nil
+	if req.StarCount < 1 || req.StarCount > 10000 {
+		return false, fmt.Errorf("star_count must be between 1 and 10000")
+	}
+	return false, fmt.Errorf("business Stars transfer is not implemented; refusing to report a false success")
 }
 
 // SetBusinessAccountGiftSettings updates gift settings for a business account.
 func (b *BotInstance) SetBusinessAccountGiftSettings(ctx context.Context, req *converter.SetBusinessAccountGiftSettingsRequest) (bool, error) {
+	var accepted converter.AcceptedGiftTypes
+	if len(req.AcceptedGiftTypes) == 0 {
+		return false, fmt.Errorf("accepted_gift_types is required")
+	}
+	if err := json.Unmarshal(req.AcceptedGiftTypes, &accepted); err != nil {
+		return false, fmt.Errorf("invalid accepted_gift_types: %w", err)
+	}
+	disallowed := tg.DisallowedGiftsSettings{
+		DisallowUnlimitedStargifts:    !accepted.UnlimitedGifts,
+		DisallowLimitedStargifts:      !accepted.LimitedGifts,
+		DisallowUniqueStargifts:       !accepted.UniqueGifts,
+		DisallowPremiumGifts:          !accepted.PremiumSubscription,
+		DisallowStargiftsFromChannels: !accepted.GiftsFromChannels,
+	}
+	settings := tg.GlobalPrivacySettings{}
+	settings.SetDisplayGiftsButton(req.ShowGiftButton)
+	settings.SetDisallowedGifts(disallowed)
+	var result tg.GlobalPrivacySettings
+	if err := b.invokeBusiness(ctx, req.BusinessConnectionID, &tg.AccountSetGlobalPrivacySettingsRequest{Settings: settings}, &result); err != nil {
+		return false, err
+	}
 	return true, nil
 }
 
 // SetBusinessAccountProfilePhoto sets a profile photo for a business account.
 func (b *BotInstance) SetBusinessAccountProfilePhoto(ctx context.Context, req *converter.SetBusinessAccountProfilePhotoRequest) (bool, error) {
+	if len(req.PhotoData) == 0 {
+		return false, fmt.Errorf("photo upload is required")
+	}
+	raw, err := b.businessRawClient(ctx, req.BusinessConnectionID)
+	if err != nil {
+		return false, err
+	}
+	fileName := req.PhotoFileName
+	if fileName == "" {
+		if req.PhotoType == "animated" {
+			fileName = "profile-photo.mp4"
+		} else {
+			fileName = "profile-photo.jpg"
+		}
+	}
+	file, err := uploader.NewUploader(raw).FromBytes(ctx, fileName, req.PhotoData)
+	if err != nil {
+		return false, fmt.Errorf("upload business profile photo: %w", err)
+	}
+	request := &tg.PhotosUploadProfilePhotoRequest{Fallback: req.IsPublic}
+	switch req.PhotoType {
+	case "static":
+		request.File = file
+	case "animated":
+		request.Video = file
+		request.VideoStartTs = req.MainFrameTimestamp
+	default:
+		return false, fmt.Errorf("profile photo type must be static or animated")
+	}
+	var result tg.PhotosPhoto
+	if err := b.invokeBusiness(ctx, req.BusinessConnectionID, request, &result); err != nil {
+		return false, err
+	}
 	return true, nil
 }
 
@@ -3493,6 +3610,8 @@ func (b *BotInstance) RepostStory(ctx context.Context, req *converter.RepostStor
 		Pinned:       req.PostToChatPage,
 		Noforwards:   req.ProtectContent,
 	}
+	request.SetFwdFromID(fromPeer)
+	request.SetFwdFromStory(req.StoryID)
 	if req.ActivePeriod != 0 {
 		request.SetPeriod(req.ActivePeriod)
 	}
@@ -3500,7 +3619,11 @@ func (b *BotInstance) RepostStory(ctx context.Context, req *converter.RepostStor
 	if err := b.invokeBusinessDirect(ctx, req.BusinessConnectionID, request, &box); err != nil {
 		return nil, err
 	}
-	return map[string]interface{}{"id": req.StoryID, "chat": converter.Chat{ID: connection.UserChatID}, "date": int(time.Now().Unix())}, nil
+	storyID := extractStoryID(box.Updates)
+	if storyID == 0 {
+		return nil, fmt.Errorf("story reposted without story id")
+	}
+	return map[string]interface{}{"id": storyID, "chat": converter.Chat{ID: connection.UserChatID}, "date": int(time.Now().Unix())}, nil
 }
 
 // EditStory edits a story previously posted through a business connection.

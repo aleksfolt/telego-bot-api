@@ -448,27 +448,27 @@ type RestrictChatMemberRequest struct {
 }
 
 type PromoteChatMemberRequest struct {
-	ChatID                   int64 `json:"chat_id"`
-	UserID                   int64 `json:"user_id"`
-	IsAnonymous              bool  `json:"is_anonymous,omitempty"`
-	CanManageChat            bool  `json:"can_manage_chat,omitempty"`
-	CanDeleteMessages        bool  `json:"can_delete_messages,omitempty"`
-	CanManageVideoChats      bool  `json:"can_manage_video_chats,omitempty"`
-	CanManageVoiceChats      bool  `json:"can_manage_voice_chats,omitempty"`
-	CanRestrictMembers       bool  `json:"can_restrict_members,omitempty"`
-	CanPromoteMembers        bool  `json:"can_promote_members,omitempty"`
-	CanChangeInfo            bool  `json:"can_change_info,omitempty"`
-	CanInviteUsers           bool  `json:"can_invite_users,omitempty"`
-	CanPostStories           bool  `json:"can_post_stories,omitempty"`
-	CanEditStories           bool  `json:"can_edit_stories,omitempty"`
-	CanDeleteStories         bool  `json:"can_delete_stories,omitempty"`
-	CanPostMessages          bool  `json:"can_post_messages,omitempty"`
-	CanEditMessages          bool  `json:"can_edit_messages,omitempty"`
-	CanPinMessages           bool  `json:"can_pin_messages,omitempty"`
-	CanManageTopics          bool  `json:"can_manage_topics,omitempty"`
-	CanManageTags            bool  `json:"can_manage_tags,omitempty"`
-	CanManageDirectMessages  bool  `json:"can_manage_direct_messages,omitempty"`
-	CanSendWelcomeMessages   bool  `json:"can_send_welcome_messages,omitempty"`
+	ChatID                  int64 `json:"chat_id"`
+	UserID                  int64 `json:"user_id"`
+	IsAnonymous             bool  `json:"is_anonymous,omitempty"`
+	CanManageChat           bool  `json:"can_manage_chat,omitempty"`
+	CanDeleteMessages       bool  `json:"can_delete_messages,omitempty"`
+	CanManageVideoChats     bool  `json:"can_manage_video_chats,omitempty"`
+	CanManageVoiceChats     bool  `json:"can_manage_voice_chats,omitempty"`
+	CanRestrictMembers      bool  `json:"can_restrict_members,omitempty"`
+	CanPromoteMembers       bool  `json:"can_promote_members,omitempty"`
+	CanChangeInfo           bool  `json:"can_change_info,omitempty"`
+	CanInviteUsers          bool  `json:"can_invite_users,omitempty"`
+	CanPostStories          bool  `json:"can_post_stories,omitempty"`
+	CanEditStories          bool  `json:"can_edit_stories,omitempty"`
+	CanDeleteStories        bool  `json:"can_delete_stories,omitempty"`
+	CanPostMessages         bool  `json:"can_post_messages,omitempty"`
+	CanEditMessages         bool  `json:"can_edit_messages,omitempty"`
+	CanPinMessages          bool  `json:"can_pin_messages,omitempty"`
+	CanManageTopics         bool  `json:"can_manage_topics,omitempty"`
+	CanManageTags           bool  `json:"can_manage_tags,omitempty"`
+	CanManageDirectMessages bool  `json:"can_manage_direct_messages,omitempty"`
+	CanSendWelcomeMessages  bool  `json:"can_send_welcome_messages,omitempty"`
 }
 
 type SetChatAdministratorCustomTitleRequest struct {
@@ -1150,17 +1150,36 @@ type TransferBusinessAccountStarsRequest struct {
 	StarCount            int64  `json:"star_count"`
 }
 
+type AcceptedGiftTypes struct {
+	UnlimitedGifts      bool `json:"unlimited_gifts"`
+	LimitedGifts        bool `json:"limited_gifts"`
+	UniqueGifts         bool `json:"unique_gifts"`
+	PremiumSubscription bool `json:"premium_subscription"`
+	GiftsFromChannels   bool `json:"gifts_from_channels"`
+}
+
 type SetBusinessAccountGiftSettingsRequest struct {
 	BusinessConnectionID string          `json:"business_connection_id"`
 	ShowGiftButton       bool            `json:"show_gift_button"`
-	AcceptedGiftTypes    json.RawMessage `json:"accepted_gift_types,omitempty"`
+	AcceptedGiftTypes    json.RawMessage `json:"accepted_gift_types"`
+}
+
+// InputProfilePhoto describes a static or animated profile photo upload.
+type InputProfilePhoto struct {
+	Type               string  `json:"type"`
+	Photo              string  `json:"photo,omitempty"`
+	Animation          string  `json:"animation,omitempty"`
+	MainFrameTimestamp float64 `json:"main_frame_timestamp,omitempty"`
 }
 
 type SetBusinessAccountProfilePhotoRequest struct {
-	BusinessConnectionID string `json:"business_connection_id"`
-	Photo                string `json:"photo"`
-	IsPublic             bool   `json:"is_public,omitempty"`
-	PhotoData            []byte `json:"-"`
+	BusinessConnectionID string          `json:"business_connection_id"`
+	Photo                json.RawMessage `json:"photo"`
+	IsPublic             bool            `json:"is_public,omitempty"`
+	PhotoData            []byte          `json:"-"`
+	PhotoFileName        string          `json:"-"`
+	PhotoType            string          `json:"-"`
+	MainFrameTimestamp   float64         `json:"-"`
 }
 
 type GetManagedBotTokenRequest struct {
@@ -1334,4 +1353,3 @@ type DeleteEphemeralMessageRequest struct {
 	ReceiverUserID     int64 `json:"receiver_user_id,omitempty"`
 	EphemeralMessageID int64 `json:"ephemeral_message_id"`
 }
-

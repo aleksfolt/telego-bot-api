@@ -3,6 +3,7 @@ package botmanager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/gotd/td/bin"
@@ -66,6 +67,36 @@ func TestRegressionBusinessSendReusesPrimaryDatacenter(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, invoked)
 	require.Equal(t, int64(43), message.MessageID)
+}
+
+func TestRegressionBusinessDatacenterPoolIsRecreatedAfterForcedClose(t *testing.T) {
+	b := mediaTestBot(func(context.Context, bin.Encoder, bin.Decoder) error {
+		t.Fatal("primary datacenter must not be used")
+		return nil
+	})
+	b.busConnDCs["business-test"] = 7
+	b.businessCurrentDC = func() int { return 2 }
+	factoryCalls := 0
+	b.businessDCFactory = func(ctx context.Context, dcID int) (telegram.CloseInvoker, error) {
+		factoryCalls++
+		if factoryCalls == 1 {
+			return testCloseInvoker{InvokeFunc: func(context.Context, bin.Encoder, bin.Decoder) error {
+				return errors.New("engine forcibly closed")
+			}}, nil
+		}
+		return testCloseInvoker{InvokeFunc: func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
+			require.IsType(t, &tg.MessagesSendMessageRequest{}, businessQuery(t, input))
+			output.(*tg.UpdatesBox).Updates = &tg.UpdateShortSentMessage{ID: 44}
+			return nil
+		}}, nil
+	}
+
+	message, err := b.SendMessage(context.Background(), &converter.SendMessageRequest{
+		BusinessConnectionID: "business-test", ChatID: 123, Text: "hello",
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(44), message.MessageID)
+	require.Equal(t, 2, factoryCalls)
 }
 
 func TestRegressionBusinessStoryIsNotWrapped(t *testing.T) {

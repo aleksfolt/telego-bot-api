@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"testing"
 
 	"telego-bot-api/internal/converter"
@@ -62,6 +63,24 @@ func TestBindRequestNestedJSONInForm(t *testing.T) {
 	assert.Contains(t, string(req.ReplyMarkup), "callback_data")
 }
 
+func TestBindBusinessProfilePhotoObject(t *testing.T) {
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod("POST")
+	ctx.Request.Header.SetContentType("application/json")
+	ctx.Request.SetBodyString(`{
+		"business_connection_id":"connection",
+		"photo":{"type":"animated","animation":"attach://avatar","main_frame_timestamp":1.25}
+	}`)
+
+	var req converter.SetBusinessAccountProfilePhotoRequest
+	assert.NoError(t, bindRequest(ctx, &req))
+	var photo converter.InputProfilePhoto
+	assert.NoError(t, json.Unmarshal(req.Photo, &photo))
+	assert.Equal(t, "animated", photo.Type)
+	assert.Equal(t, "attach://avatar", photo.Animation)
+	assert.Equal(t, 1.25, photo.MainFrameTimestamp)
+}
+
 func TestParseContentDisposition(t *testing.T) {
 	// Standard quoted format
 	cd1 := `form-data; name="document"; filename="file.pdf"`
@@ -95,4 +114,3 @@ func TestBindRequestThumbnailAlias(t *testing.T) {
 	assert.Equal(t, "attach://doc1", req.Document)
 	assert.Equal(t, "attach://thumb1", req.Thumbnail)
 }
-

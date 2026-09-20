@@ -153,23 +153,51 @@ func (b *BotInstance) businessInvoker(ctx context.Context, dcID int) (telegram.C
 	return invoker, nil
 }
 
-func (b *BotInstance) invokeInBusinessDC(ctx context.Context, dcID int, input bin.Encoder, output bin.Decoder) error {
+func (b *BotInstance) rawBusinessInvoker(ctx context.Context, dcID int) (tg.Invoker, error) {
 	// auth.exportAuthorization only accepts a different target DC. Reuse the
 	// primary client when the business connection already belongs to its DC.
 	if b.businessCurrentDC != nil && b.businessCurrentDC() == dcID {
 		if b.client == nil {
-			return fmt.Errorf("primary datacenter client is unavailable")
+			return nil, fmt.Errorf("primary datacenter client is unavailable")
 		}
-		return b.client.Invoke(ctx, input, output)
+		return b.client, nil
 	}
 
-	invoker, err := b.businessInvoker(ctx, dcID)
+	return telegram.InvokeFunc(func(callCtx context.Context, input bin.Encoder, output bin.Decoder) error {
+		var lastErr error
+		for poolAttempt := 0; poolAttempt < 2; poolAttempt++ {
+			invoker, err := b.businessInvoker(callCtx, dcID)
+			if err != nil {
+				return err
+			}
+			invoke := businessErrorMiddleware{}.Handle(invoker)
+			invoke = retryMiddleware{logger: b.logger}.Handle(invoke)
+			lastErr = invoke(callCtx, input, output)
+			if lastErr == nil || !isTransientMTProtoError(lastErr) || callCtx.Err() != nil {
+				return lastErr
+			}
+			b.discardBusinessInvoker(dcID)
+		}
+		return lastErr
+	}), nil
+}
+
+func (b *BotInstance) discardBusinessInvoker(dcID int) {
+	b.businessDCMu.Lock()
+	invoker := b.businessDCPools[dcID]
+	delete(b.businessDCPools, dcID)
+	b.businessDCMu.Unlock()
+	if invoker != nil {
+		_ = invoker.Close()
+	}
+}
+
+func (b *BotInstance) invokeInBusinessDC(ctx context.Context, dcID int, input bin.Encoder, output bin.Decoder) error {
+	invoker, err := b.rawBusinessInvoker(ctx, dcID)
 	if err != nil {
 		return err
 	}
-	invoke := businessErrorMiddleware{}.Handle(invoker)
-	invoke = retryMiddleware{logger: b.logger}.Handle(invoke)
-	return invoke(ctx, input, output)
+	return invoker.Invoke(ctx, input, output)
 }
 
 func (b *BotInstance) invokeBusiness(ctx context.Context, connectionID string, query bin.Object, output bin.Decoder) error {
@@ -189,6 +217,21 @@ func (b *BotInstance) invokeBusinessDirect(ctx context.Context, connectionID str
 		return err
 	}
 	return b.invokeInBusinessDC(ctx, dcID, query, output)
+}
+
+// businessRawClient returns an unwrapped MTProto client in the connection DC.
+// It is used for uploading temporary file parts that must be consumed by a
+// subsequent business request in the same datacenter.
+func (b *BotInstance) businessRawClient(ctx context.Context, connectionID string) (*tg.Client, error) {
+	_, dcID, err := b.businessConnection(ctx, connectionID, true)
+	if err != nil {
+		return nil, err
+	}
+	invoker, err := b.rawBusinessInvoker(ctx, dcID)
+	if err != nil {
+		return nil, err
+	}
+	return tg.NewClient(invoker), nil
 }
 
 func (b *BotInstance) closeBusinessInvokers() {
