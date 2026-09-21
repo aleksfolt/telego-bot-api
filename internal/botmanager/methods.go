@@ -2453,30 +2453,66 @@ func (b *BotInstance) GetStarTransactions(ctx context.Context, req *converter.Ge
 	}
 	transactions := make([]interface{}, 0, len(result.History))
 	for _, transaction := range result.History {
-		amount, nanos := int64(0), 0
-		if value, ok := transaction.Amount.(*tg.StarsAmount); ok {
-			amount, nanos = value.Amount, value.Nanos
-		}
-		item := map[string]interface{}{"id": transaction.ID, "amount": amount, "date": transaction.Date}
-		if nanos != 0 {
-			item["nanostar_amount"] = nanos
-		}
-		if transaction.BotPayload != nil {
-			item["invoice_payload"] = string(transaction.BotPayload)
-		}
-		if peer, ok := transaction.Peer.(*tg.StarsTransactionPeer); ok {
-			if userPeer, ok := peer.Peer.(*tg.PeerUser); ok {
-				partner := map[string]interface{}{"transaction_type": "user", "user": users[userPeer.UserID]}
-				if amount >= 0 {
-					item["source"] = partner
-				} else {
-					item["receiver"] = partner
-				}
-			}
-		}
-		transactions = append(transactions, item)
+		transactions = append(transactions, convertStarTransaction(transaction, users))
 	}
 	return &converter.StarTransactions{Transactions: transactions}, nil
+}
+
+func convertStarTransaction(transaction tg.StarsTransaction, users map[int64]converter.User) map[string]interface{} {
+	amount, nanos := int64(0), 0
+	if value, ok := transaction.Amount.(*tg.StarsAmount); ok {
+		amount, nanos = value.Amount, value.Nanos
+	}
+	item := map[string]interface{}{"id": transaction.ID, "amount": amount, "date": transaction.Date}
+	if nanos != 0 {
+		item["nanostar_amount"] = nanos
+	}
+
+	peer, ok := transaction.Peer.(*tg.StarsTransactionPeer)
+	if !ok {
+		return item
+	}
+	userPeer, ok := peer.Peer.(*tg.PeerUser)
+	if !ok {
+		return item
+	}
+
+	transactionType := "invoice_payment"
+	switch {
+	case transaction.BusinessTransfer:
+		transactionType = "business_account_transfer"
+	case transaction.PremiumGiftMonths > 0:
+		transactionType = "premium_purchase"
+	case transaction.Gift:
+		transactionType = "gift_purchase"
+	case len(transaction.ExtendedMedia) > 0:
+		transactionType = "paid_media_payment"
+	}
+	partner := map[string]interface{}{
+		"type":             "user",
+		"transaction_type": transactionType,
+		"user":             users[userPeer.UserID],
+	}
+	if transaction.BotPayload != nil {
+		if transactionType == "paid_media_payment" {
+			partner["paid_media_payload"] = string(transaction.BotPayload)
+		} else if transactionType == "invoice_payment" {
+			partner["invoice_payload"] = string(transaction.BotPayload)
+		}
+	}
+	if transaction.SubscriptionPeriod != 0 && transactionType == "invoice_payment" {
+		partner["subscription_period"] = transaction.SubscriptionPeriod
+	}
+	if transaction.PremiumGiftMonths != 0 && transactionType == "premium_purchase" {
+		partner["premium_subscription_duration"] = transaction.PremiumGiftMonths
+	}
+
+	if amount >= 0 && !transaction.Refund {
+		item["source"] = partner
+	} else {
+		item["receiver"] = partner
+	}
+	return item
 }
 
 // GetAvailableGifts returns available gifts.

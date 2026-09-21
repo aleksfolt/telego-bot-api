@@ -198,6 +198,7 @@ type Message struct {
 	PinnedMessage                 *Message                       `json:"pinned_message,omitempty"`
 	MessageAutoDeleteTimerChanged *MessageAutoDeleteTimerChanged `json:"message_auto_delete_timer_changed,omitempty"`
 	SuccessfulPayment             *SuccessfulPayment             `json:"successful_payment,omitempty"`
+	RefundedPayment               *RefundedPayment               `json:"refunded_payment,omitempty"`
 	ReplyToMessage                *Message                       `json:"reply_to_message,omitempty"`
 	ReplyMarkup                   *InlineKeyboardMarkup          `json:"reply_markup,omitempty"`
 }
@@ -330,6 +331,15 @@ type SuccessfulPayment struct {
 	OrderInfo                  *OrderInfo `json:"order_info,omitempty"`
 	TelegramPaymentChargeID    string     `json:"telegram_payment_charge_id"`
 	ProviderPaymentChargeID    string     `json:"provider_payment_charge_id"`
+}
+
+// RefundedPayment contains information about a refunded payment.
+type RefundedPayment struct {
+	Currency                string `json:"currency"`
+	TotalAmount             int64  `json:"total_amount"`
+	InvoicePayload          string `json:"invoice_payload"`
+	TelegramPaymentChargeID string `json:"telegram_payment_charge_id"`
+	ProviderPaymentChargeID string `json:"provider_payment_charge_id,omitempty"`
 }
 
 type ShippingQuery struct {

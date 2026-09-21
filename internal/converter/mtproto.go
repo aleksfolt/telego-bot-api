@@ -959,6 +959,14 @@ func convertServiceMessage(service *tg.MessageService, entities *EntityContext) 
 			payment.OrderInfo = convertOrderInfo(action.Info)
 		}
 		message.SuccessfulPayment = payment
+	case *tg.MessageActionPaymentRefunded:
+		message.RefundedPayment = &RefundedPayment{
+			Currency:                action.Currency,
+			TotalAmount:             action.TotalAmount,
+			InvoicePayload:          string(action.Payload),
+			TelegramPaymentChargeID: action.Charge.ID,
+			ProviderPaymentChargeID: action.Charge.ProviderChargeID,
+		}
 	}
 	if header, ok := service.ReplyTo.(*tg.MessageReplyHeader); ok && header.ReplyToMsgID != 0 {
 		message.ReplyToMessage = &Message{MessageID: int64(header.ReplyToMsgID), Chat: message.Chat}

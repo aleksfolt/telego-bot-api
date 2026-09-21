@@ -197,6 +197,36 @@ func TestConvertUpdateSuccessfulStarsPayment(t *testing.T) {
 	assert.Contains(t, string(data), `"currency":"XTR"`)
 }
 
+func TestConvertUpdateRefundedStarsPayment(t *testing.T) {
+	c := converter.NewMTProtoConverter()
+	entities := converter.NewEntityContext([]tg.UserClass{
+		&tg.User{ID: 12345, FirstName: "Buyer"},
+	}, nil)
+	action := &tg.MessageActionPaymentRefunded{
+		Peer:        &tg.PeerUser{UserID: 12345},
+		Currency:    "XTR",
+		TotalAmount: 100,
+		Payload:     []byte("stars:premium:1"),
+		Charge:      tg.PaymentCharge{ID: "telegram-charge", ProviderChargeID: "provider-charge"},
+	}
+	action.SetFlags()
+
+	converted, err := c.ConvertUpdate(1226, &tg.UpdateNewMessage{Message: &tg.MessageService{
+		ID: 78, Date: 1_700_000_001, PeerID: &tg.PeerUser{UserID: 12345},
+		FromID: &tg.PeerUser{UserID: 12345}, Action: action,
+	}}, entities)
+	require.NoError(t, err)
+	require.NotNil(t, converted.Message)
+	require.NotNil(t, converted.Message.RefundedPayment)
+
+	refund := converted.Message.RefundedPayment
+	assert.Equal(t, "XTR", refund.Currency)
+	assert.Equal(t, int64(100), refund.TotalAmount)
+	assert.Equal(t, "stars:premium:1", refund.InvoicePayload)
+	assert.Equal(t, "telegram-charge", refund.TelegramPaymentChargeID)
+	assert.Equal(t, "provider-charge", refund.ProviderPaymentChargeID)
+}
+
 func TestConvertUpdate_BusinessConnection(t *testing.T) {
 	c := converter.NewMTProtoConverter()
 	entities := converter.NewEntityContext([]tg.UserClass{
@@ -483,10 +513,10 @@ func TestConvertUpdate_BusinessMessage_ReplyToSelfDestructPhoto(t *testing.T) {
 			ReplyTo: &tg.MessageReplyHeader{ReplyToMsgID: 1},
 		},
 		ReplyToMessage: &tg.Message{
-			ID:      1,
-			Date:    1700000000,
-			PeerID:  &tg.PeerUser{UserID: 200},
-			FromID:  &tg.PeerUser{UserID: 100},
+			ID:     1,
+			Date:   1700000000,
+			PeerID: &tg.PeerUser{UserID: 200},
+			FromID: &tg.PeerUser{UserID: 100},
 			Media: &tg.MessageMediaPhoto{
 				TTLSeconds: 0x7FFFFFFF,
 				Photo: &tg.Photo{
