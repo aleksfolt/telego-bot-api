@@ -143,6 +143,60 @@ func TestConvertUpdate(t *testing.T) {
 	assert.Contains(t, string(data), `"first_name":"Alice"`)
 }
 
+func TestConvertUpdateSuccessfulStarsPayment(t *testing.T) {
+	c := converter.NewMTProtoConverter()
+	entities := converter.NewEntityContext([]tg.UserClass{
+		&tg.User{ID: 12345, FirstName: "Buyer"},
+	}, nil)
+
+	info := tg.PaymentRequestedInfo{
+		Name:  "Buyer Name",
+		Email: "buyer@example.com",
+	}
+	info.SetFlags()
+	action := &tg.MessageActionPaymentSentMe{
+		RecurringInit:         true,
+		Currency:              "XTR",
+		TotalAmount:           100,
+		Payload:               []byte("stars:premium:1"),
+		Info:                  info,
+		ShippingOptionID:      "digital",
+		Charge:                tg.PaymentCharge{ID: "telegram-charge", ProviderChargeID: "provider-charge"},
+		SubscriptionUntilDate: 1_800_000_000,
+	}
+	action.SetFlags()
+
+	converted, err := c.ConvertUpdate(1225, &tg.UpdateNewMessage{Message: &tg.MessageService{
+		ID:     77,
+		Date:   1_700_000_000,
+		PeerID: &tg.PeerUser{UserID: 12345},
+		FromID: &tg.PeerUser{UserID: 12345},
+		Action: action,
+	}}, entities)
+	require.NoError(t, err)
+	require.NotNil(t, converted)
+	require.NotNil(t, converted.Message)
+	require.NotNil(t, converted.Message.SuccessfulPayment)
+
+	payment := converted.Message.SuccessfulPayment
+	assert.Equal(t, "XTR", payment.Currency)
+	assert.Equal(t, int64(100), payment.TotalAmount)
+	assert.Equal(t, "stars:premium:1", payment.InvoicePayload)
+	assert.Equal(t, "telegram-charge", payment.TelegramPaymentChargeID)
+	assert.Equal(t, "provider-charge", payment.ProviderPaymentChargeID)
+	assert.Equal(t, 1_800_000_000, payment.SubscriptionExpirationDate)
+	assert.True(t, payment.IsRecurring)
+	assert.True(t, payment.IsFirstRecurring)
+	require.NotNil(t, payment.OrderInfo)
+	assert.Equal(t, "Buyer Name", payment.OrderInfo.Name)
+	assert.Equal(t, "buyer@example.com", payment.OrderInfo.Email)
+
+	data, err := json.Marshal(converted)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"successful_payment"`)
+	assert.Contains(t, string(data), `"currency":"XTR"`)
+}
+
 func TestConvertUpdate_BusinessConnection(t *testing.T) {
 	c := converter.NewMTProtoConverter()
 	entities := converter.NewEntityContext([]tg.UserClass{
@@ -476,4 +530,3 @@ func TestConvertUpdate_BusinessMessage_ReplyToSelfDestructPhoto(t *testing.T) {
 	assert.Contains(t, string(data), `"has_protected_content":true`)
 	assert.Contains(t, string(data), `"file_id"`)
 }
-

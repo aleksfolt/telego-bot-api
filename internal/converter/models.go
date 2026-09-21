@@ -197,6 +197,7 @@ type Message struct {
 	MigrateFromChatID             int64                          `json:"migrate_from_chat_id,omitempty"`
 	PinnedMessage                 *Message                       `json:"pinned_message,omitempty"`
 	MessageAutoDeleteTimerChanged *MessageAutoDeleteTimerChanged `json:"message_auto_delete_timer_changed,omitempty"`
+	SuccessfulPayment             *SuccessfulPayment             `json:"successful_payment,omitempty"`
 	ReplyToMessage                *Message                       `json:"reply_to_message,omitempty"`
 	ReplyMarkup                   *InlineKeyboardMarkup          `json:"reply_markup,omitempty"`
 }
@@ -315,6 +316,20 @@ type OrderInfo struct {
 	PhoneNumber     string           `json:"phone_number,omitempty"`
 	Email           string           `json:"email,omitempty"`
 	ShippingAddress *ShippingAddress `json:"shipping_address,omitempty"`
+}
+
+// SuccessfulPayment contains information about a completed payment.
+type SuccessfulPayment struct {
+	Currency                   string     `json:"currency"`
+	TotalAmount                int64      `json:"total_amount"`
+	InvoicePayload             string     `json:"invoice_payload"`
+	SubscriptionExpirationDate int        `json:"subscription_expiration_date,omitempty"`
+	IsRecurring                bool       `json:"is_recurring,omitempty"`
+	IsFirstRecurring           bool       `json:"is_first_recurring,omitempty"`
+	ShippingOptionID           string     `json:"shipping_option_id,omitempty"`
+	OrderInfo                  *OrderInfo `json:"order_info,omitempty"`
+	TelegramPaymentChargeID    string     `json:"telegram_payment_charge_id"`
+	ProviderPaymentChargeID    string     `json:"provider_payment_charge_id"`
 }
 
 type ShippingQuery struct {

@@ -943,6 +943,22 @@ func convertServiceMessage(service *tg.MessageService, entities *EntityContext) 
 		}
 	case *tg.MessageActionSetMessagesTTL:
 		message.MessageAutoDeleteTimerChanged = &MessageAutoDeleteTimerChanged{MessageAutoDeleteTime: action.Period}
+	case *tg.MessageActionPaymentSentMe:
+		payment := &SuccessfulPayment{
+			Currency:                   action.Currency,
+			TotalAmount:                action.TotalAmount,
+			InvoicePayload:             string(action.Payload),
+			SubscriptionExpirationDate: action.SubscriptionUntilDate,
+			IsRecurring:                action.RecurringInit || action.RecurringUsed,
+			IsFirstRecurring:           action.RecurringInit,
+			ShippingOptionID:           action.ShippingOptionID,
+			TelegramPaymentChargeID:    action.Charge.ID,
+			ProviderPaymentChargeID:    action.Charge.ProviderChargeID,
+		}
+		if _, ok := action.GetInfo(); ok {
+			payment.OrderInfo = convertOrderInfo(action.Info)
+		}
+		message.SuccessfulPayment = payment
 	}
 	if header, ok := service.ReplyTo.(*tg.MessageReplyHeader); ok && header.ReplyToMsgID != 0 {
 		message.ReplyToMessage = &Message{MessageID: int64(header.ReplyToMsgID), Chat: message.Chat}
