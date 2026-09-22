@@ -3,6 +3,7 @@ package api_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"os"
 	"testing"
@@ -268,3 +269,62 @@ func getFileKeys(m map[string][]*multipart.FileHeader) []string {
 	return res
 }
 
+func TestServerFastHTTPErrorHandler(t *testing.T) {
+	logger := zap.NewNop()
+	cfg := &config.Config{
+		HTTPAddr: "127.0.0.1:0",
+	}
+	rdb := storage.NewRedisStore("127.0.0.1:6379", "", 0)
+	dispatcher := webhook.NewDispatcher(1, 10, logger)
+	defer dispatcher.Stop()
+	bm := botmanager.NewManager(cfg, rdb, dispatcher, logger)
+	srv := api.NewServer(cfg.HTTPAddr, bm, dispatcher, logger, cfg)
+
+	// 1. Timeout error returns 408 JSON
+	{
+		ctx := &fasthttp.RequestCtx{}
+		srv.HandleFastHTTPError(ctx, errors.New("connection read timeout: deadline exceeded"))
+
+		assert.Equal(t, 408, ctx.Response.StatusCode())
+		assert.Equal(t, "application/json", string(ctx.Response.Header.ContentType()))
+
+		var resp converter.ApiResponse
+		err := json.Unmarshal(ctx.Response.Body(), &resp)
+		require.NoError(t, err)
+		assert.False(t, resp.OK)
+		assert.Equal(t, 408, resp.ErrorCode)
+		assert.Equal(t, "Request Timeout", resp.Description)
+	}
+
+	// 2. Request body too large returns 413 JSON
+	{
+		ctx := &fasthttp.RequestCtx{}
+		srv.HandleFastHTTPError(ctx, fasthttp.ErrBodyTooLarge)
+
+		assert.Equal(t, 413, ctx.Response.StatusCode())
+		assert.Equal(t, "application/json", string(ctx.Response.Header.ContentType()))
+
+		var resp converter.ApiResponse
+		err := json.Unmarshal(ctx.Response.Body(), &resp)
+		require.NoError(t, err)
+		assert.False(t, resp.OK)
+		assert.Equal(t, 413, resp.ErrorCode)
+		assert.Equal(t, "Request Entity Too Large", resp.Description)
+	}
+
+	// 3. Generic bad request returns 400 JSON
+	{
+		ctx := &fasthttp.RequestCtx{}
+		srv.HandleFastHTTPError(ctx, errors.New("malformed HTTP headers"))
+
+		assert.Equal(t, 400, ctx.Response.StatusCode())
+		assert.Equal(t, "application/json", string(ctx.Response.Header.ContentType()))
+
+		var resp converter.ApiResponse
+		err := json.Unmarshal(ctx.Response.Body(), &resp)
+		require.NoError(t, err)
+		assert.False(t, resp.OK)
+		assert.Equal(t, 400, resp.ErrorCode)
+		assert.Contains(t, resp.Description, "malformed HTTP headers")
+	}
+}

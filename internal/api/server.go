@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"telego-bot-api/internal/botmanager"
+	"telego-bot-api/internal/config"
 	"telego-bot-api/internal/converter"
 	"telego-bot-api/internal/metrics"
 	"telego-bot-api/internal/webhook"
@@ -32,22 +34,64 @@ type Server struct {
 }
 
 // NewServer creates a new API HTTP server.
-func NewServer(addr string, botManager *botmanager.Manager, dispatcher *webhook.Dispatcher, logger *zap.Logger) *Server {
+func NewServer(addr string, botManager *botmanager.Manager, dispatcher *webhook.Dispatcher, logger *zap.Logger, optionalCfg ...*config.Config) *Server {
 	s := &Server{
 		addr:       addr,
 		botManager: botManager,
 		dispatcher: dispatcher,
 		logger:     logger,
 	}
+
+	readTimeout := time.Duration(0)   // 0 = disabled (allow large uploads / slow streams)
+	writeTimeout := 600 * time.Second // 10 minutes (allow MTProto multi-part uploads/downloads)
+	idleTimeout := 60 * time.Second   // 1 minute idle keep-alive
+
+	if len(optionalCfg) > 0 && optionalCfg[0] != nil {
+		readTimeout = optionalCfg[0].HTTPReadTimeout
+		writeTimeout = optionalCfg[0].HTTPWriteTimeout
+		idleTimeout = optionalCfg[0].HTTPIdleTimeout
+	}
+
 	s.fastServer = &fasthttp.Server{
 		Handler:            s.HandleRequest,
 		Name:               "telego-bot-api",
-		ReadTimeout:        60 * time.Second,
-		WriteTimeout:       60 * time.Second,
-		IdleTimeout:        15 * time.Second,
+		ReadTimeout:        readTimeout,
+		WriteTimeout:       writeTimeout,
+		IdleTimeout:        idleTimeout,
 		MaxRequestBodySize: 2048 * 1024 * 1024, // 2GB for large file uploads
+		ErrorHandler:       s.HandleFastHTTPError,
 	}
 	return s
+}
+
+// handleFastHTTPError ensures that low-level FastHTTP errors (such as timeouts, payload too large,
+// or invalid HTTP requests) return standard Telegram Bot API JSON responses instead of plain text.
+func (s *Server) HandleFastHTTPError(ctx *fasthttp.RequestCtx, err error) {
+	if err == nil {
+		return
+	}
+	statusCode := fasthttp.StatusBadRequest
+	desc := "Bad Request: " + err.Error()
+
+	errStr := strings.ToLower(err.Error())
+	if errors.Is(err, fasthttp.ErrBodyTooLarge) {
+		statusCode = fasthttp.StatusRequestEntityTooLarge
+		desc = "Request Entity Too Large"
+	} else if strings.Contains(errStr, "timeout") {
+		statusCode = fasthttp.StatusRequestTimeout
+		desc = "Request Timeout"
+	} else if strings.Contains(errStr, "connection reset") || strings.Contains(errStr, "broken pipe") {
+		return
+	}
+
+	ctx.Response.Reset()
+	ctx.SetContentType("application/json")
+	ctx.SetStatusCode(statusCode)
+	_ = json.NewEncoder(ctx).Encode(converter.ApiResponse{
+		OK:          false,
+		ErrorCode:   statusCode,
+		Description: desc,
+	})
 }
 
 // Start runs the HTTP server.
@@ -777,7 +821,7 @@ func (s *Server) handleEditMessageMedia(ctx *fasthttp.RequestCtx, bot *botmanage
 
 	req.Files, req.FileNames = ExtractAllFilesFromRequest(ctx)
 
-	c, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	c, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	msg, err := bot.EditMessageMedia(c, &req)
@@ -1158,7 +1202,7 @@ func (s *Server) handleSendPhoto(ctx *fasthttp.RequestCtx, bot *botmanager.BotIn
 		return
 	}
 
-	c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	c, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	msg, err := bot.SendPhoto(c, &req)
@@ -1197,7 +1241,7 @@ func (s *Server) handleSendVideo(ctx *fasthttp.RequestCtx, bot *botmanager.BotIn
 		return
 	}
 
-	c, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	c, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
 	msg, err := bot.SendVideo(c, &req)
@@ -1236,7 +1280,7 @@ func (s *Server) handleSendDocument(ctx *fasthttp.RequestCtx, bot *botmanager.Bo
 		return
 	}
 
-	c, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	c, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
 	msg, err := bot.SendDocument(c, &req)
@@ -1272,7 +1316,7 @@ func (s *Server) handleSendVoice(ctx *fasthttp.RequestCtx, bot *botmanager.BotIn
 		return
 	}
 
-	c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	c, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	msg, err := bot.SendVoice(c, &req)
@@ -1311,7 +1355,7 @@ func (s *Server) handleSendVideoNote(ctx *fasthttp.RequestCtx, bot *botmanager.B
 		return
 	}
 
-	c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	c, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	msg, err := bot.SendVideoNote(c, &req)
@@ -1350,7 +1394,7 @@ func (s *Server) handleSendAudio(ctx *fasthttp.RequestCtx, bot *botmanager.BotIn
 		return
 	}
 
-	c, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	c, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
 	msg, err := bot.SendAudio(c, &req)
@@ -1386,7 +1430,7 @@ func (s *Server) handleSendSticker(ctx *fasthttp.RequestCtx, bot *botmanager.Bot
 		return
 	}
 
-	c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	c, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	msg, err := bot.SendSticker(c, &req)
@@ -1425,7 +1469,7 @@ func (s *Server) handleSendAnimation(ctx *fasthttp.RequestCtx, bot *botmanager.B
 		return
 	}
 
-	c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	c, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
 	msg, err := bot.SendAnimation(c, &req)
@@ -1478,7 +1522,7 @@ func (s *Server) handleDownloadFile(ctx *fasthttp.RequestCtx) {
 	}
 
 	ctx.SetContentType("application/octet-stream")
-	c, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	c, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
 	if err := bot.DownloadFile(c, fileID, ctx); err != nil {
@@ -1619,7 +1663,7 @@ func (s *Server) handleSendMediaGroup(ctx *fasthttp.RequestCtx, bot *botmanager.
 		s.respondError(ctx, 400, "Bad Request: chat_id and media are required")
 		return
 	}
-	c, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	c, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
 	msgs, err := bot.SendMediaGroup(c, &req)

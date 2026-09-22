@@ -71,7 +71,7 @@ func main() {
 	}()
 
 	// 5. FastHTTP server for grammY requests
-	srv := api.NewServer(cfg.HTTPAddr, bm, dispatcher, logger)
+	srv := api.NewServer(cfg.HTTPAddr, bm, dispatcher, logger, cfg)
 
 	// Setup graceful shutdown listener for SIGINT and SIGTERM
 	sigChan := make(chan os.Signal, 1)
