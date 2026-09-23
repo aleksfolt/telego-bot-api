@@ -328,22 +328,37 @@ bot.launch();
 Шлюз предоставляет встроенный эндпоинт состояния:
 
 - `GET /health` или `GET /status`:
-  Возвращает общее количество ботов, статус подключения каждого бота (`active` / `hibernated`), время последнего события и конфигурацию вебхуков:
+  Возвращает состояние Redis и очереди вебхуков, число ботов и время последней активности каждого бота:
   ```json
   {
     "ok": true,
+    "status": "healthy",
+    "redis": "connected",
     "total_bots": 4,
+    "active_bots": 4,
+    "hibernated_bots": 0,
+    "webhook_queue": 0,
     "bots": [
       {
-        "token_prefix": "7026718333",
         "bot_id": 7026718333,
-        "is_hibernated": false,
-        "seconds_idle": 12,
-        "has_webhook": true
+        "username": "example_bot",
+        "hibernated": false,
+        "idle_seconds": 12,
+        "last_active": "2026-09-24T12:00:00Z"
       }
     ]
   }
   ```
+
+При `--log-format=json` входящие обновления содержат `user_id`, если у события есть отправитель, а ошибки методов отправки содержат `chat_id`. Для поиска событий и ошибок конкретного пользователя в логах systemd:
+
+```bash
+USER_ID=123456789
+sudo journalctl -u telego-bot-api --since "24 hours ago" -o cat --no-pager |
+  jq -Rrc --argjson id "$USER_ID" 'fromjson? | select(.user_id == $id or .chat_id == $id)'
+```
+
+`Webhook delivered successfully` означает HTTP-ответ `2xx` от приложения бота. Обработка обновления и отправка ответа происходят в приложении, поэтому его ошибки нужно искать в логах самого приложения. Доставленные обновления удаляются из Redis Stream и позже недоступны для поиска по ID.
 
 ---
 

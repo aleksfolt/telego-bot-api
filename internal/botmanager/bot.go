@@ -496,19 +496,22 @@ func (b *BotInstance) Handle(ctx context.Context, u tg.UpdatesClass) error {
 
 		kind := updateKind(upd)
 		sender := describeUpdateSender(upd)
+		fields := []zap.Field{
+			zap.Int("update_id", upd.UpdateID),
+			zap.String("type", kind),
+			zap.String("from", sender),
+		}
+		if userID := updateSenderID(upd); userID != 0 {
+			fields = append(fields, zap.Int64("user_id", userID))
+		}
+		if chatID := updateChatID(upd); chatID != 0 {
+			fields = append(fields, zap.Int64("chat_id", chatID))
+		}
 		if url != "" {
 			b.notifyWebhookDelivery()
-			b.logger.Info("Update received -> Webhook",
-				zap.Int("update_id", upd.UpdateID),
-				zap.String("type", kind),
-				zap.String("from", sender),
-			)
+			b.logger.Info("Update received -> Webhook", fields...)
 		} else {
-			b.logger.Info("Update received -> Polling stream",
-				zap.Int("update_id", upd.UpdateID),
-				zap.String("type", kind),
-				zap.String("from", sender),
-			)
+			b.logger.Info("Update received -> Polling stream", fields...)
 		}
 	}
 
@@ -2729,6 +2732,82 @@ func describeUpdateSender(upd *converter.Update) string {
 		}
 	}
 	return desc
+}
+
+func updateSenderID(upd *converter.Update) int64 {
+	switch {
+	case upd.Message != nil && upd.Message.From != nil:
+		return upd.Message.From.ID
+	case upd.EditedMessage != nil && upd.EditedMessage.From != nil:
+		return upd.EditedMessage.From.ID
+	case upd.BusinessMessage != nil && upd.BusinessMessage.From != nil:
+		return upd.BusinessMessage.From.ID
+	case upd.EditedBusinessMessage != nil && upd.EditedBusinessMessage.From != nil:
+		return upd.EditedBusinessMessage.From.ID
+	case upd.BusinessConnection != nil:
+		return upd.BusinessConnection.User.ID
+	case upd.CallbackQuery != nil:
+		return upd.CallbackQuery.From.ID
+	case upd.InlineQuery != nil:
+		return upd.InlineQuery.From.ID
+	case upd.ChosenInlineResult != nil:
+		return upd.ChosenInlineResult.From.ID
+	case upd.ShippingQuery != nil:
+		return upd.ShippingQuery.From.ID
+	case upd.PreCheckoutQuery != nil:
+		return upd.PreCheckoutQuery.From.ID
+	case upd.PollAnswer != nil && upd.PollAnswer.User != nil:
+		return upd.PollAnswer.User.ID
+	case upd.ChatJoinRequest != nil:
+		return upd.ChatJoinRequest.From.ID
+	case upd.MyChatMember != nil:
+		return upd.MyChatMember.From.ID
+	case upd.ChatMember != nil:
+		return upd.ChatMember.From.ID
+	case upd.MessageReaction != nil && upd.MessageReaction.User != nil:
+		return upd.MessageReaction.User.ID
+	case upd.PurchasedPaidMedia != nil:
+		return upd.PurchasedPaidMedia.From.ID
+	default:
+		return 0
+	}
+}
+
+func updateChatID(upd *converter.Update) int64 {
+	switch {
+	case upd.Message != nil:
+		return upd.Message.Chat.ID
+	case upd.EditedMessage != nil:
+		return upd.EditedMessage.Chat.ID
+	case upd.ChannelPost != nil:
+		return upd.ChannelPost.Chat.ID
+	case upd.EditedChannelPost != nil:
+		return upd.EditedChannelPost.Chat.ID
+	case upd.BusinessMessage != nil:
+		return upd.BusinessMessage.Chat.ID
+	case upd.EditedBusinessMessage != nil:
+		return upd.EditedBusinessMessage.Chat.ID
+	case upd.DeletedBusinessMessages != nil:
+		return upd.DeletedBusinessMessages.Chat.ID
+	case upd.CallbackQuery != nil && upd.CallbackQuery.Message != nil:
+		return upd.CallbackQuery.Message.Chat.ID
+	case upd.ChatJoinRequest != nil:
+		return upd.ChatJoinRequest.Chat.ID
+	case upd.MyChatMember != nil:
+		return upd.MyChatMember.Chat.ID
+	case upd.ChatMember != nil:
+		return upd.ChatMember.Chat.ID
+	case upd.ChatBoost != nil:
+		return upd.ChatBoost.Chat.ID
+	case upd.RemovedChatBoost != nil:
+		return upd.RemovedChatBoost.Chat.ID
+	case upd.MessageReaction != nil:
+		return upd.MessageReaction.Chat.ID
+	case upd.MessageReactionCount != nil:
+		return upd.MessageReactionCount.Chat.ID
+	default:
+		return 0
+	}
 }
 
 func extractSentMessage(updates tg.UpdatesClass) (int64, tg.ReplyMarkupClass) {

@@ -735,6 +735,15 @@ func (s *Server) handleGetUpdates(ctx *fasthttp.RequestCtx, bot *botmanager.BotI
 	s.respondOK(ctx, updates)
 }
 
+func (s *Server) logSendFailure(bot *botmanager.BotInstance, method string, chatID int64, err error) {
+	token := bot.Token()
+	s.logger.Error(method+" failed",
+		zap.String("token_prefix", token[:min(10, len(token))]),
+		zap.Int64("chat_id", chatID),
+		zap.Error(err),
+	)
+}
+
 func (s *Server) handleSendMessage(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
 	var req converter.SendMessageRequest
 	if err := bindRequest(ctx, &req); err != nil {
@@ -760,7 +769,7 @@ func (s *Server) handleSendMessage(ctx *fasthttp.RequestCtx, bot *botmanager.Bot
 		}
 	}
 	if err != nil {
-		s.logger.Error("SendMessage failed", zap.Error(err))
+		s.logSendFailure(bot, "SendMessage", req.ChatID, err)
 		s.respondError(ctx, 400, "Bad Request: "+err.Error())
 		return
 	}
@@ -1207,7 +1216,7 @@ func (s *Server) handleSendPhoto(ctx *fasthttp.RequestCtx, bot *botmanager.BotIn
 
 	msg, err := bot.SendPhoto(c, &req)
 	if err != nil {
-		s.logger.Error("SendPhoto failed", zap.Error(err))
+		s.logSendFailure(bot, "SendPhoto", req.ChatID, err)
 		s.respondError(ctx, 400, "Bad Request: "+err.Error())
 		return
 	}
@@ -1246,7 +1255,7 @@ func (s *Server) handleSendVideo(ctx *fasthttp.RequestCtx, bot *botmanager.BotIn
 
 	msg, err := bot.SendVideo(c, &req)
 	if err != nil {
-		s.logger.Error("SendVideo failed", zap.Error(err))
+		s.logSendFailure(bot, "SendVideo", req.ChatID, err)
 		s.respondError(ctx, 400, "Bad Request: "+err.Error())
 		return
 	}
@@ -1285,7 +1294,7 @@ func (s *Server) handleSendDocument(ctx *fasthttp.RequestCtx, bot *botmanager.Bo
 
 	msg, err := bot.SendDocument(c, &req)
 	if err != nil {
-		s.logger.Error("SendDocument failed", zap.Error(err))
+		s.logSendFailure(bot, "SendDocument", req.ChatID, err)
 		s.respondError(ctx, 400, "Bad Request: "+err.Error())
 		return
 	}
@@ -1321,7 +1330,7 @@ func (s *Server) handleSendVoice(ctx *fasthttp.RequestCtx, bot *botmanager.BotIn
 
 	msg, err := bot.SendVoice(c, &req)
 	if err != nil {
-		s.logger.Error("SendVoice failed", zap.Error(err))
+		s.logSendFailure(bot, "SendVoice", req.ChatID, err)
 		s.respondError(ctx, 400, "Bad Request: "+err.Error())
 		return
 	}
@@ -1360,7 +1369,7 @@ func (s *Server) handleSendVideoNote(ctx *fasthttp.RequestCtx, bot *botmanager.B
 
 	msg, err := bot.SendVideoNote(c, &req)
 	if err != nil {
-		s.logger.Error("SendVideoNote failed", zap.Error(err))
+		s.logSendFailure(bot, "SendVideoNote", req.ChatID, err)
 		s.respondError(ctx, 400, "Bad Request: "+err.Error())
 		return
 	}
@@ -1399,7 +1408,7 @@ func (s *Server) handleSendAudio(ctx *fasthttp.RequestCtx, bot *botmanager.BotIn
 
 	msg, err := bot.SendAudio(c, &req)
 	if err != nil {
-		s.logger.Error("SendAudio failed", zap.Error(err))
+		s.logSendFailure(bot, "SendAudio", req.ChatID, err)
 		s.respondError(ctx, 400, "Bad Request: "+err.Error())
 		return
 	}
@@ -1435,7 +1444,7 @@ func (s *Server) handleSendSticker(ctx *fasthttp.RequestCtx, bot *botmanager.Bot
 
 	msg, err := bot.SendSticker(c, &req)
 	if err != nil {
-		s.logger.Error("SendSticker failed", zap.Error(err))
+		s.logSendFailure(bot, "SendSticker", req.ChatID, err)
 		s.respondError(ctx, 400, "Bad Request: "+err.Error())
 		return
 	}
@@ -1474,7 +1483,7 @@ func (s *Server) handleSendAnimation(ctx *fasthttp.RequestCtx, bot *botmanager.B
 
 	msg, err := bot.SendAnimation(c, &req)
 	if err != nil {
-		s.logger.Error("SendAnimation failed", zap.Error(err))
+		s.logSendFailure(bot, "SendAnimation", req.ChatID, err)
 		s.respondError(ctx, 400, "Bad Request: "+err.Error())
 		return
 	}
@@ -1668,7 +1677,7 @@ func (s *Server) handleSendMediaGroup(ctx *fasthttp.RequestCtx, bot *botmanager.
 
 	msgs, err := bot.SendMediaGroup(c, &req)
 	if err != nil {
-		s.logger.Error("SendMediaGroup failed", zap.Error(err))
+		s.logSendFailure(bot, "SendMediaGroup", req.ChatID, err)
 		s.respondError(ctx, 400, "Bad Request: "+err.Error())
 		return
 	}

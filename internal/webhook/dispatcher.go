@@ -80,6 +80,7 @@ func (d *Dispatcher) EnqueueTask(task *Task) {
 	case d.queue <- task:
 	default:
 		d.logger.Warn("Webhook queue full, dropping update",
+			zap.Int64("bot_id", task.BotID),
 			zap.Int("update_id", task.Update.UpdateID),
 			zap.String("url", task.URL),
 		)
@@ -128,6 +129,7 @@ func (d *Dispatcher) processTask(req *fasthttp.Request, resp *fasthttp.Response,
 	}
 	if err := d.sendWebhook(req, resp, task); err != nil {
 		d.logger.Error("Failed to deliver webhook",
+			zap.Int64("bot_id", task.BotID),
 			zap.String("url", task.URL),
 			zap.Int("update_id", task.Update.UpdateID),
 			zap.Error(err),
@@ -171,6 +173,7 @@ func (d *Dispatcher) sendWebhook(req *fasthttp.Request, resp *fasthttp.Response,
 			statusCode := resp.StatusCode()
 			if statusCode >= 200 && statusCode < 300 {
 				d.logger.Info("Webhook delivered successfully",
+					zap.Int64("bot_id", task.BotID),
 					zap.String("url", task.URL),
 					zap.Int("update_id", task.Update.UpdateID),
 					zap.Int("status", statusCode),
