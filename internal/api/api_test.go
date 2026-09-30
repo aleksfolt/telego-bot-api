@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"mime/multipart"
+	"net"
 	"os"
 	"testing"
 
@@ -70,6 +71,7 @@ func TestServerRouting(t *testing.T) {
 	// 3. /health and /status endpoints
 	{
 		ctx := &fasthttp.RequestCtx{}
+		ctx.SetRemoteAddr(&net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
 		ctx.Request.SetRequestURI("/health")
 		srv.HandleRequest(ctx)
 
@@ -84,6 +86,7 @@ func TestServerRouting(t *testing.T) {
 	// 4. /metrics endpoint
 	{
 		ctx := &fasthttp.RequestCtx{}
+		ctx.SetRemoteAddr(&net.TCPAddr{IP: net.IPv4(10, 0, 0, 5)})
 		ctx.Request.SetRequestURI("/metrics")
 		srv.HandleRequest(ctx)
 
@@ -91,6 +94,33 @@ func TestServerRouting(t *testing.T) {
 		assert.Contains(t, string(ctx.Response.Body()), "telego_uptime_seconds")
 		assert.Contains(t, string(ctx.Response.Body()), "telego_bots_total")
 	}
+
+	// 5. Diagnostic endpoints are hidden from public IPs
+	for _, path := range []string{"/health", "/status", "/metrics"} {
+		ctx := &fasthttp.RequestCtx{}
+		ctx.SetRemoteAddr(&net.TCPAddr{IP: net.IPv4(203, 0, 113, 7)})
+		ctx.Request.SetRequestURI(path)
+		srv.HandleRequest(ctx)
+
+		assert.Equal(t, 404, ctx.Response.StatusCode(), path)
+	}
+
+	// 6. Malformed token is rejected before any MTProto connection
+	{
+		ctx := &fasthttp.RequestCtx{}
+		ctx.Request.SetRequestURI("/botnot-a-token/getMe")
+		srv.HandleRequest(ctx)
+
+		assert.Equal(t, 401, ctx.Response.StatusCode())
+	}
+}
+
+func TestValidTokenFormat(t *testing.T) {
+	assert.True(t, botmanager.ValidTokenFormat("8790710590:AAGoCKgBXrTKa-5_ZOlWU5eKwtNEG2PL3vA"))
+	assert.False(t, botmanager.ValidTokenFormat("8790710590"))
+	assert.False(t, botmanager.ValidTokenFormat("abc:AAGoCKgBXrTKa-5_ZOlWU5eKwtNEG2PL3vA"))
+	assert.False(t, botmanager.ValidTokenFormat("8790710590:short"))
+	assert.False(t, botmanager.ValidTokenFormat("8790710590:AAGoCKgBXrTKa-5_ZOlWU5eKwtNEG2PL3vA/../x"))
 }
 
 func TestApiResponse_ParametersSerialization(t *testing.T) {

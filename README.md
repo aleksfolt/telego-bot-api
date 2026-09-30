@@ -265,7 +265,9 @@ export TELEGO_LOG_FORMAT="console"
 |---|---|---|---|
 | `--api-id` | `TELEGO_API_ID` / `TELEGRAM_API_ID` | `0` | Telegram API ID с my.telegram.org |
 | `--api-hash` | `TELEGO_API_HASH` / `TELEGRAM_API_HASH` | `""` | Telegram API Hash с my.telegram.org |
-| `--http-addr` | `TELEGO_HTTP_ADDR` / `HTTP_ADDR` | `0.0.0.0:8081` | Адрес и порт HTTP сервера Bot API |
+| `--http-addr` | `TELEGO_HTTP_ADDR` / `HTTP_ADDR` | `127.0.0.1:8081` | Адрес и порт HTTP сервера Bot API (для доступа извне укажите `0.0.0.0:<порт>`) |
+| `--http-read-timeout` | `TELEGO_HTTP_READ_TIMEOUT` | `30m` | Максимальное время чтения запроса (включая загрузку файла) |
+| `--public-status` | `TELEGO_PUBLIC_STATUS` | `false` | Отдавать `/health`, `/status`, `/metrics` публичным IP (по умолчанию только localhost и приватные сети) |
 | `--redis-addr` | `TELEGO_REDIS_ADDR` / `REDIS_ADDR` | `127.0.0.1:6379` | Адрес Redis (хост:порт) |
 | `--redis-pass` | `TELEGO_REDIS_PASSWORD` / `REDIS_PASSWORD` | `""` | Пароль Redis (если включен AUTH) |
 | `--redis-db` | `TELEGO_REDIS_DB` / `REDIS_DB` | `0` | Номер базы Redis |

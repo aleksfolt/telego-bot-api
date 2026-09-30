@@ -31,6 +31,8 @@ type Server struct {
 	dispatcher *webhook.Dispatcher
 	logger     *zap.Logger
 	fastServer *fasthttp.Server
+	// publicStatus allows /health, /status and /metrics from public IPs.
+	publicStatus bool
 }
 
 // NewServer creates a new API HTTP server.
@@ -42,7 +44,7 @@ func NewServer(addr string, botManager *botmanager.Manager, dispatcher *webhook.
 		logger:     logger,
 	}
 
-	readTimeout := time.Duration(0)   // 0 = disabled (allow large uploads / slow streams)
+	readTimeout := 30 * time.Minute   // generous for large uploads, but bounds stuck clients
 	writeTimeout := 600 * time.Second // 10 minutes (allow MTProto multi-part uploads/downloads)
 	idleTimeout := 60 * time.Second   // 1 minute idle keep-alive
 
@@ -50,6 +52,7 @@ func NewServer(addr string, botManager *botmanager.Manager, dispatcher *webhook.
 		readTimeout = optionalCfg[0].HTTPReadTimeout
 		writeTimeout = optionalCfg[0].HTTPWriteTimeout
 		idleTimeout = optionalCfg[0].HTTPIdleTimeout
+		s.publicStatus = optionalCfg[0].PublicStatus
 	}
 
 	s.fastServer = &fasthttp.Server{
@@ -111,6 +114,15 @@ func (s *Server) ListenAndServe() error {
 	return s.Start()
 }
 
+// statusAllowed reports whether the client may read diagnostic endpoints.
+func (s *Server) statusAllowed(ctx *fasthttp.RequestCtx) bool {
+	if s.publicStatus {
+		return true
+	}
+	ip := ctx.RemoteIP()
+	return ip.IsLoopback() || ip.IsPrivate()
+}
+
 // HandleRequest routes incoming Bot API HTTP requests: /bot<token>/<method> or /file/bot<token>/<file_path>
 func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 	defer func() {
@@ -128,6 +140,12 @@ func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 	// Handle file download: /file/bot<token>/<file_path>
 	if strings.HasPrefix(path, "/file/bot") {
 		s.handleDownloadFile(ctx)
+		return
+	}
+
+	// Diagnostic endpoints list every bot, so hide them from the public internet by default.
+	if (path == "/metrics" || path == "/status" || path == "/health") && !s.statusAllowed(ctx) {
+		s.respondError(ctx, 404, "Not Found")
 		return
 	}
 

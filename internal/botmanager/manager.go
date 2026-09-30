@@ -2,7 +2,9 @@ package botmanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"regexp"
 	"sync"
 	"time"
 
@@ -144,11 +146,27 @@ func (m *Manager) LoadAndStartAll(ctx context.Context) error {
 	return nil
 }
 
+// ErrInvalidTokenFormat is returned for strings that cannot be a Bot API token.
+var ErrInvalidTokenFormat = errors.New("invalid token format")
+
+// botTokenPattern matches "<bot_id>:<secret>" as issued by BotFather.
+var botTokenPattern = regexp.MustCompile(`^[0-9]{1,20}:[A-Za-z0-9_-]{30,64}$`)
+
+// ValidTokenFormat reports whether token looks like a Bot API token. Checked before any
+// MTProto connection so garbage tokens cannot trigger auth attempts from the server IP.
+func ValidTokenFormat(token string) bool {
+	return botTokenPattern.MatchString(token)
+}
+
 // GetOrCreate returns an existing bot instance or initializes a new one.
 // Fast path is lock-free reading. Slow path uses singleflight so that multiple
 // requests for DIFFERENT bots initialize completely concurrently in parallel,
 // and m.mu is never held during network connection to Telegram.
 func (m *Manager) GetOrCreate(ctx context.Context, token string) (*BotInstance, error) {
+	if !ValidTokenFormat(token) {
+		return nil, ErrInvalidTokenFormat
+	}
+
 	// 1. Fast path: check already-active bots
 	m.mu.RLock()
 	bot, ok := m.bots[token]
@@ -175,8 +193,12 @@ func (m *Manager) GetOrCreate(ctx context.Context, token string) (*BotInstance, 
 		}
 
 		bot = NewBotInstance(token, m.cfg.AppID, m.cfg.AppHash, m.dispatcher, m.redisStore, m.logger, m.dialer, m.cfg.MTProtoDebug)
+		bot.onRevoked = m.dropRevokedBot
 		// Connect to Telegram MTProto in parallel — NO global mutex is held!
 		if err := bot.Start(ctx); err != nil {
+			if IsTokenRevoked(err) {
+				m.purgeToken(token)
+			}
 			return nil, fmt.Errorf("start bot session: %w", err)
 		}
 
@@ -218,6 +240,30 @@ func (m *Manager) CloseBot(token string) bool {
 		return true
 	}
 	return false
+}
+
+// dropRevokedBot unloads a running bot whose token Telegram rejected permanently.
+func (m *Manager) dropRevokedBot(bot *BotInstance) {
+	m.mu.Lock()
+	if m.bots[bot.token] == bot {
+		delete(m.bots, bot.token)
+	}
+	m.mu.Unlock()
+
+	bot.Stop()
+	m.purgeToken(bot.token)
+}
+
+// purgeToken removes all Redis state of a revoked token so it is not restored or warmed up
+// again after restart. Pending updates are keyed by bot ID and are kept.
+func (m *Manager) purgeToken(token string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = m.redisStore.UnregisterBot(ctx, token)
+	_ = m.redisStore.DeleteWebhook(ctx, token)
+	_ = m.redisStore.DeleteSession(ctx, token)
+	_ = m.redisStore.DeleteBotProfile(ctx, token)
+	m.logger.Warn("Revoked bot token purged from Redis", zap.String("token_prefix", token[:min(10, len(token))]))
 }
 
 // ResetBot unloads an active bot instance and purges its MTProto session from Redis.
@@ -318,7 +364,7 @@ func (m *Manager) GetBotsStatus() []BotStatus {
 			username = me.Username
 		}
 		res = append(res, BotStatus{
-			BotID:       b.botID,
+			BotID:       b.BotID(),
 			Username:    username,
 			Hibernated:  b.IsHibernated(),
 			IdleSeconds: idle,

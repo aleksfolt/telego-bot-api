@@ -22,8 +22,8 @@ func mediaTestBot(fn telegram.InvokeFunc) *BotInstance {
 		telegram.MiddlewareFunc(func(tg.Invoker) telegram.InvokeFunc { return fn }),
 	}})
 	bot := &BotInstance{
-		client: client,
-		raw:    tg.NewClient(fn), peers: peer.NewStorage(),
+		client:    client,
+		peers:     peer.NewStorage(),
 		converter: converter.NewMTProtoConverter(), logger: zap.NewNop(),
 		self:            &converter.User{ID: 1, IsBot: true},
 		busConns:        map[string]*converter.BusinessConnection{"business-test": {ID: "business-test", IsEnabled: true}},
@@ -31,6 +31,7 @@ func mediaTestBot(fn telegram.InvokeFunc) *BotInstance {
 		businessDCPools: make(map[int]telegram.CloseInvoker),
 		mediaCache:      make(map[string]*tg.InputPhoto), docCache: make(map[string]*tg.InputDocument),
 	}
+	bot.rawClient.Store(tg.NewClient(fn))
 	bot.businessDCFactory = func(context.Context, int) (telegram.CloseInvoker, error) {
 		return testCloseInvoker{InvokeFunc: fn}, nil
 	}

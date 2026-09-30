@@ -71,10 +71,10 @@ func (b *BotInstance) businessConnection(ctx context.Context, connectionID strin
 		}
 	}
 
-	if b.raw == nil {
+	if b.raw() == nil {
 		return nil, 0, fmt.Errorf("business connection %q routing information is unavailable", connectionID)
 	}
-	updates, err := b.raw.AccountGetBotBusinessConnection(ctx, connectionID)
+	updates, err := b.raw().AccountGetBotBusinessConnection(ctx, connectionID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("get business connection %q: %w", connectionID, err)
 	}

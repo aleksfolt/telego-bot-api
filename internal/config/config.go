@@ -25,6 +25,9 @@ type Config struct {
 	HTTPReadTimeout  time.Duration
 	HTTPWriteTimeout time.Duration
 	HTTPIdleTimeout  time.Duration
+	// PublicStatus exposes /health, /status and /metrics to public IPs.
+	// By default they answer only loopback and private-network clients.
+	PublicStatus bool
 }
 
 // Load loads configuration from environment variables and command-line flags.
@@ -32,7 +35,7 @@ func Load() *Config {
 	cfg := &Config{
 		AppID:            2040,
 		AppHash:          "b18441a1ff607e10a989891a5462e627",
-		HTTPAddr:         "0.0.0.0:8081",
+		HTTPAddr:         "127.0.0.1:8081",
 		OutboundIPs:      nil,
 		RedisAddr:        "127.0.0.1:6379",
 		RedisPassword:    "",
@@ -40,7 +43,7 @@ func Load() *Config {
 		LogLevel:         "info",
 		LogFormat:        "console",
 		MTProtoDebug:     false,
-		HTTPReadTimeout:  0,                 // 0 = disabled (prevents killing large file uploads or slow connections)
+		HTTPReadTimeout:  30 * time.Minute,  // generous enough for 2GB uploads on slow links, but bounds stuck clients
 		HTTPWriteTimeout: 600 * time.Second, // 10 minutes to allow multi-part MTProto uploads and downloads
 		HTTPIdleTimeout:  60 * time.Second,  // keep-alive idle connection timeout
 	}
@@ -82,6 +85,9 @@ func Load() *Config {
 	if val := getEnv("TELEGO_PPROF_ADDR", "PPROF_ADDR"); val != "" {
 		cfg.PprofAddr = val
 	}
+	if val := getEnv("TELEGO_PUBLIC_STATUS", "PUBLIC_STATUS"); val == "true" || val == "1" {
+		cfg.PublicStatus = true
+	}
 	if val := getEnv("TELEGO_WARMUP_ALL", "WARMUP_ALL"); val == "true" || val == "1" {
 		cfg.WarmupAll = true
 	}
@@ -121,7 +127,8 @@ func Load() *Config {
 	flag.BoolVar(&cfg.MTProtoDebug, "mtproto-debug", cfg.MTProtoDebug, "Enable verbose wire-level MTProto transport debug dumps (default: false)")
 	flag.StringVar(&cfg.PprofAddr, "pprof-addr", cfg.PprofAddr, "Optional address for pprof HTTP server (e.g. 127.0.0.1:6060)")
 	flag.BoolVar(&cfg.WarmupAll, "warmup-all", cfg.WarmupAll, "Warm up all registered bots in background (default: false, lazy on-demand like official telegram-bot-api)")
-	flag.StringVar(&readTimeoutFlag, "http-read-timeout", "", "HTTP read timeout (e.g. 0, 300s, 10m; default: 0)")
+	flag.BoolVar(&cfg.PublicStatus, "public-status", cfg.PublicStatus, "Serve /health, /status and /metrics to public IPs (default: loopback and private networks only)")
+	flag.StringVar(&readTimeoutFlag, "http-read-timeout", "", "HTTP read timeout (e.g. 0, 300s, 10m; default: 30m)")
 	flag.StringVar(&writeTimeoutFlag, "http-write-timeout", "", "HTTP write timeout (e.g. 300s, 10m; default: 600s)")
 	flag.StringVar(&idleTimeoutFlag, "http-idle-timeout", "", "HTTP idle timeout (e.g. 60s, 2m; default: 60s)")
 	flag.Parse()

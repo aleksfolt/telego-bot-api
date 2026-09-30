@@ -34,6 +34,7 @@ import (
 	"github.com/gotd/td/telegram/downloader"
 	"github.com/gotd/td/telegram/uploader"
 	"github.com/gotd/td/tg"
+	"github.com/gotd/td/tgerr"
 	"go.uber.org/zap"
 )
 
@@ -43,7 +44,7 @@ type BotInstance struct {
 	appID      int
 	appHash    string
 	client     *telegram.Client
-	raw        *tg.Client
+	rawClient  atomic.Pointer[tg.Client]
 	peers      *peer.Storage
 	converter  *converter.MTProtoConverter
 	dispatcher *webhook.Dispatcher
@@ -60,6 +61,9 @@ type BotInstance struct {
 	// Set to 0 until authentication completes.
 	botID        int64
 	updateNotify chan struct{}
+
+	// onRevoked is called once when Telegram rejects the token permanently after startup.
+	onRevoked func(*BotInstance)
 
 	lastActive atomic.Int64 // UnixNano timestamp of last incoming or outgoing event
 	hibernated atomic.Bool  // true when RAM caches are freed and bot is in idle/hibernation
@@ -257,14 +261,14 @@ func (b *BotInstance) Start(ctx context.Context) error {
 			runErr := b.client.Run(ctx, func(runCtx context.Context) error {
 				// Connected successfully: reset backoff
 				backoff = 1 * time.Second
-				b.raw = b.client.API()
+				b.rawClient.Store(b.client.API())
 
 				var user *tg.User
 				// Fast path: check if existing session from Redis is already authorized
 				status, statusErr := b.client.Auth().Status(runCtx)
 				if statusErr == nil && status != nil && status.Authorized && status.User != nil {
 					// Verify with Telegram DC that the cached session's auth key is still active
-					users, pingErr := b.raw.UsersGetUsers(runCtx, []tg.InputUserClass{&tg.InputUserSelf{}})
+					users, pingErr := b.raw().UsersGetUsers(runCtx, []tg.InputUserClass{&tg.InputUserSelf{}})
 					if pingErr != nil {
 						b.logger.Warn("Failed to verify cached session with Telegram DC", zap.Error(pingErr))
 						if strings.Contains(pingErr.Error(), "AUTH_KEY_UNREGISTERED") {
@@ -362,6 +366,17 @@ func (b *BotInstance) Start(ctx context.Context) error {
 				return
 			}
 
+			if IsTokenRevoked(runErr) {
+				b.logger.Error("Bot token rejected by Telegram, stopping session",
+					zap.Error(runErr),
+					zap.String("token_prefix", b.token[:min(10, len(b.token))]),
+				)
+				if b.onRevoked != nil {
+					go b.onRevoked(b)
+				}
+				return
+			}
+
 			b.logger.Warn("MTProto client disconnected, attempting reconnection...",
 				zap.Error(runErr),
 				zap.Duration("retry_after", backoff),
@@ -385,15 +400,28 @@ func (b *BotInstance) Start(ctx context.Context) error {
 		}
 	}()
 
+	// On failure the client loop must be cancelled: otherwise it may still connect later,
+	// leaving an unregistered duplicate session that receives the same updates.
 	select {
 	case err := <-errChan:
+		b.Stop()
 		return err
 	case <-b.ready:
 		b.restartWebhookDelivery()
 		return nil
+	case <-ctx.Done():
+		b.Stop()
+		return ctx.Err()
 	case <-time.After(20 * time.Second):
+		b.Stop()
 		return fmt.Errorf("timeout waiting for bot connection to Telegram DC")
 	}
+}
+
+// IsTokenRevoked reports whether err means the bot token is permanently invalid
+// (revoked in BotFather, expired, or the bot was deleted), so reconnecting is pointless.
+func IsTokenRevoked(err error) bool {
+	return tgerr.Is(err, "ACCESS_TOKEN_INVALID", "ACCESS_TOKEN_EXPIRED", "USER_DEACTIVATED", "USER_DEACTIVATED_BAN")
 }
 
 // Handle handles incoming MTProto updates from Telegram.
@@ -850,7 +878,7 @@ func (b *BotInstance) Hibernate() {
 
 	b.peers.Reset()
 
-	b.logger.Info("Bot entered hibernation mode; RAM caches evicted", zap.Int64("bot_id", b.botID))
+	b.logger.Info("Bot entered hibernation mode; RAM caches evicted", zap.Int64("bot_id", b.BotID()))
 }
 
 // WakeUp restores the bot to active mode.
@@ -859,7 +887,20 @@ func (b *BotInstance) WakeUp() {
 		return
 	}
 
-	b.logger.Info("Bot woke up from hibernation", zap.Int64("bot_id", b.botID))
+	b.logger.Info("Bot woke up from hibernation", zap.Int64("bot_id", b.BotID()))
+}
+
+// raw returns the MTProto API client, or nil until the first connection is established.
+// It is swapped on every reconnect, so it is read atomically.
+func (b *BotInstance) raw() *tg.Client {
+	return b.rawClient.Load()
+}
+
+// BotID returns the Telegram user ID of the bot, or 0 until authorization completes.
+func (b *BotInstance) BotID() int64 {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.botID
 }
 
 // GetMe returns bot profile information.
@@ -871,8 +912,8 @@ func (b *BotInstance) GetMe() *converter.User {
 
 // RefreshMe fetches the freshest bot profile from Telegram MTProto to reflect any recent BotFather changes.
 func (b *BotInstance) RefreshMe(ctx context.Context) *converter.User {
-	if b.raw != nil {
-		users, err := b.raw.UsersGetUsers(ctx, []tg.InputUserClass{&tg.InputUserSelf{}})
+	if b.raw() != nil {
+		users, err := b.raw().UsersGetUsers(ctx, []tg.InputUserClass{&tg.InputUserSelf{}})
 		if err == nil && len(users) > 0 {
 			if u, ok := users[0].AsNotEmpty(); ok {
 				canConnectBusiness := u.GetBotBusiness() || os.Getenv("TELEGO_FORCE_BUSINESS_MODE") == "true"
@@ -929,14 +970,14 @@ func (b *BotInstance) GetOrRefreshMe(ctx context.Context) *converter.User {
 	b.mu.RUnlock()
 
 	if self != nil {
-		if fresh || b.raw == nil || !b.selfRefreshing.CompareAndSwap(false, true) {
+		if fresh || b.raw() == nil || !b.selfRefreshing.CompareAndSwap(false, true) {
 			return self
 		}
 		defer b.selfRefreshing.Store(false)
 		return b.RefreshMe(ctx)
 	}
 
-	if b.raw != nil {
+	if b.raw() != nil {
 		return b.RefreshMe(ctx)
 	}
 	return b.GetMe()
@@ -970,10 +1011,10 @@ func (b *BotInstance) resolvePeer(chatID int64) (tg.InputPeerClass, error) {
 	}
 
 	// Try fetching dialogs via MTProto to discover any channels/chats the bot belongs to
-	if b.raw != nil {
+	if b.raw() != nil {
 		dCtx, dCancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer dCancel()
-		if res, dErr := b.raw.MessagesGetDialogs(dCtx, &tg.MessagesGetDialogsRequest{
+		if res, dErr := b.raw().MessagesGetDialogs(dCtx, &tg.MessagesGetDialogsRequest{
 			OffsetPeer: &tg.InputPeerEmpty{},
 			Limit:      100,
 		}); dErr == nil {
@@ -1072,7 +1113,7 @@ func (b *BotInstance) SendMessage(ctx context.Context, req *converter.SendMessag
 		}
 		updates = box.Updates
 	} else {
-		updates, err = b.raw.MessagesSendMessage(ctx, sendReq)
+		updates, err = b.raw().MessagesSendMessage(ctx, sendReq)
 		if err != nil {
 			return nil, fmt.Errorf("mtproto send message: %w", err)
 		}
@@ -1143,7 +1184,7 @@ func (b *BotInstance) EditMessageText(ctx context.Context, req *converter.EditMe
 			return nil, fmt.Errorf("mtproto business edit message text: %w", err)
 		}
 	} else {
-		_, err = b.raw.MessagesEditMessage(ctx, editReq)
+		_, err = b.raw().MessagesEditMessage(ctx, editReq)
 		if err != nil {
 			return nil, fmt.Errorf("mtproto edit message text: %w", err)
 		}
@@ -1181,7 +1222,7 @@ func (b *BotInstance) DeleteMessage(ctx context.Context, req *converter.DeleteMe
 	}
 
 	if channel, ok := peer.(*tg.InputPeerChannel); ok {
-		_, err = b.raw.ChannelsDeleteMessages(ctx, &tg.ChannelsDeleteMessagesRequest{
+		_, err = b.raw().ChannelsDeleteMessages(ctx, &tg.ChannelsDeleteMessagesRequest{
 			Channel: &tg.InputChannel{
 				ChannelID:  channel.ChannelID,
 				AccessHash: channel.AccessHash,
@@ -1189,7 +1230,7 @@ func (b *BotInstance) DeleteMessage(ctx context.Context, req *converter.DeleteMe
 			ID: []int{int(req.MessageID)},
 		})
 	} else {
-		_, err = b.raw.MessagesDeleteMessages(ctx, &tg.MessagesDeleteMessagesRequest{
+		_, err = b.raw().MessagesDeleteMessages(ctx, &tg.MessagesDeleteMessagesRequest{
 			Revoke: true,
 			ID:     []int{int(req.MessageID)},
 		})
@@ -1268,7 +1309,7 @@ func (b *BotInstance) SendChatAction(ctx context.Context, req *converter.SendCha
 		var res tg.BoolBox
 		err = b.invokeBusiness(ctx, req.BusinessConnectionID, setTypingReq, &res)
 	} else {
-		_, err = b.raw.MessagesSetTyping(ctx, setTypingReq)
+		_, err = b.raw().MessagesSetTyping(ctx, setTypingReq)
 	}
 	if err != nil {
 		return false, fmt.Errorf("mtproto set typing: %w", err)
@@ -1289,7 +1330,7 @@ func (b *BotInstance) CopyMessage(ctx context.Context, req *converter.CopyMessag
 
 	randomID, _ := rand.Int(rand.Reader, big.NewInt(1<<62))
 
-	updates, err := b.raw.MessagesForwardMessages(ctx, &tg.MessagesForwardMessagesRequest{
+	updates, err := b.raw().MessagesForwardMessages(ctx, &tg.MessagesForwardMessagesRequest{
 		DropAuthor: true,
 		Noforwards: req.ProtectContent,
 		FromPeer:   fromPeer,
@@ -1332,7 +1373,7 @@ func (b *BotInstance) CopyMessage(ctx context.Context, req *converter.CopyMessag
 			}
 			editReq.ReplyMarkup = markup
 		}
-		if _, err := b.raw.MessagesEditMessage(ctx, editReq); err != nil {
+		if _, err := b.raw().MessagesEditMessage(ctx, editReq); err != nil {
 			return nil, fmt.Errorf("edit copied message: %w", err)
 		}
 	}
@@ -1383,7 +1424,7 @@ func (b *BotInstance) EditMessageCaption(ctx context.Context, req *converter.Edi
 			return nil, fmt.Errorf("mtproto business edit message caption: %w", err)
 		}
 	} else {
-		_, err = b.raw.MessagesEditMessage(ctx, editReq)
+		_, err = b.raw().MessagesEditMessage(ctx, editReq)
 		if err != nil {
 			return nil, fmt.Errorf("mtproto edit message caption: %w", err)
 		}
@@ -1421,7 +1462,7 @@ func (b *BotInstance) EditMessageReplyMarkup(ctx context.Context, req *converter
 			return nil, fmt.Errorf("mtproto business edit reply markup: %w", err)
 		}
 	} else {
-		_, err = b.raw.MessagesEditMessage(ctx, editReq)
+		_, err = b.raw().MessagesEditMessage(ctx, editReq)
 		if err != nil {
 			return nil, fmt.Errorf("mtproto edit reply markup: %w", err)
 		}
@@ -1490,7 +1531,7 @@ func (b *BotInstance) EditMessageMedia(ctx context.Context, req *converter.EditM
 		}
 		updates = box.Updates
 	} else {
-		updates, err = b.raw.MessagesEditMessage(ctx, editReq)
+		updates, err = b.raw().MessagesEditMessage(ctx, editReq)
 		if err != nil {
 			return nil, fmt.Errorf("mtproto edit media: %w", err)
 		}
@@ -1562,7 +1603,7 @@ func (b *BotInstance) sendMedia(ctx context.Context, businessConnectionID string
 				ttlSeconds = orig.TTLSeconds
 			}
 
-			res, err := b.raw.MessagesUploadMedia(ctx, &tg.MessagesUploadMediaRequest{
+			res, err := b.raw().MessagesUploadMedia(ctx, &tg.MessagesUploadMediaRequest{
 				BusinessConnectionID: businessConnectionID,
 				Peer:                 sendReq.Peer,
 				Media:                m,
@@ -1612,7 +1653,7 @@ func (b *BotInstance) sendMedia(ctx context.Context, businessConnectionID string
 		}
 		return box.Updates, nil
 	}
-	return b.raw.MessagesSendMedia(ctx, sendReq)
+	return b.raw().MessagesSendMedia(ctx, sendReq)
 }
 
 // SendPhoto sends a photo to a chat with optional caption and markup.
@@ -1642,7 +1683,7 @@ func (b *BotInstance) SendPhoto(ctx context.Context, req *converter.SendPhotoReq
 		if fileName == "" {
 			fileName = "photo.jpg"
 		}
-		u := uploader.NewUploader(b.raw)
+		u := uploader.NewUploader(b.raw())
 		inputFile, err := u.FromBytes(ctx, fileName, req.PhotoData)
 		if err != nil {
 			return nil, fmt.Errorf("upload photo bytes: %w", err)
@@ -1697,7 +1738,7 @@ func (b *BotInstance) SendPhoto(ctx context.Context, req *converter.SendPhotoReq
 				data, err := os.ReadFile(localPath)
 				if err == nil && len(data) > 0 {
 					fileName := filepath.Base(localPath)
-					u := uploader.NewUploader(b.raw)
+					u := uploader.NewUploader(b.raw())
 					inputFile, err := u.FromBytes(ctx, fileName, data)
 					if err != nil {
 						return nil, fmt.Errorf("upload local photo bytes: %w", err)
@@ -1821,7 +1862,7 @@ func (b *BotInstance) SendVideo(ctx context.Context, req *converter.SendVideoReq
 		if fileName == "" {
 			fileName = "video.mp4"
 		}
-		u := uploader.NewUploader(b.raw)
+		u := uploader.NewUploader(b.raw())
 		inputFile, err := u.FromBytes(ctx, fileName, req.VideoData)
 		if err != nil {
 			return nil, fmt.Errorf("upload video bytes: %w", err)
@@ -1886,7 +1927,7 @@ func (b *BotInstance) SendVideo(ctx context.Context, req *converter.SendVideoReq
 				data, err := os.ReadFile(localPath)
 				if err == nil && len(data) > 0 {
 					fileName := filepath.Base(localPath)
-					u := uploader.NewUploader(b.raw)
+					u := uploader.NewUploader(b.raw())
 					inputFile, err := u.FromBytes(ctx, fileName, data)
 					if err != nil {
 						return nil, fmt.Errorf("upload local video bytes: %w", err)
@@ -2030,7 +2071,7 @@ func (b *BotInstance) SendDocument(ctx context.Context, req *converter.SendDocum
 		if fileName == "" {
 			fileName = "document.bin"
 		}
-		u := uploader.NewUploader(b.raw)
+		u := uploader.NewUploader(b.raw())
 		inputFile, err := u.FromBytes(ctx, fileName, req.DocumentData)
 		if err != nil {
 			return nil, fmt.Errorf("upload document bytes: %w", err)
@@ -2090,7 +2131,7 @@ func (b *BotInstance) SendDocument(ctx context.Context, req *converter.SendDocum
 				data, err := os.ReadFile(localPath)
 				if err == nil && len(data) > 0 {
 					fileName := filepath.Base(localPath)
-					u := uploader.NewUploader(b.raw)
+					u := uploader.NewUploader(b.raw())
 					inputFile, err := u.FromBytes(ctx, fileName, data)
 					if err != nil {
 						return nil, fmt.Errorf("upload local document bytes: %w", err)
@@ -2217,7 +2258,7 @@ func (b *BotInstance) SendVoice(ctx context.Context, req *converter.SendVoiceReq
 		if fileName == "" {
 			fileName = "voice.ogg"
 		}
-		u := uploader.NewUploader(b.raw)
+		u := uploader.NewUploader(b.raw())
 		inputFile, err := u.FromBytes(ctx, fileName, req.VoiceData)
 		if err != nil {
 			return nil, fmt.Errorf("upload voice bytes: %w", err)
@@ -2259,7 +2300,7 @@ func (b *BotInstance) SendVoice(ctx context.Context, req *converter.SendVoiceReq
 				data, err := os.ReadFile(localPath)
 				if err == nil && len(data) > 0 {
 					fileName := filepath.Base(localPath)
-					u := uploader.NewUploader(b.raw)
+					u := uploader.NewUploader(b.raw())
 					inputFile, err := u.FromBytes(ctx, fileName, data)
 					if err != nil {
 						return nil, fmt.Errorf("upload local voice bytes: %w", err)
@@ -2366,7 +2407,7 @@ func (b *BotInstance) SendVideoNote(ctx context.Context, req *converter.SendVide
 		if fileName == "" {
 			fileName = "video_note.mp4"
 		}
-		u := uploader.NewUploader(b.raw)
+		u := uploader.NewUploader(b.raw())
 		inputFile, err := u.FromBytes(ctx, fileName, req.VideoNoteData)
 		if err != nil {
 			return nil, fmt.Errorf("upload video note bytes: %w", err)
@@ -2418,7 +2459,7 @@ func (b *BotInstance) SendVideoNote(ctx context.Context, req *converter.SendVide
 				data, err := os.ReadFile(localPath)
 				if err == nil && len(data) > 0 {
 					fileName := filepath.Base(localPath)
-					u := uploader.NewUploader(b.raw)
+					u := uploader.NewUploader(b.raw())
 					inputFile, err := u.FromBytes(ctx, fileName, data)
 					if err != nil {
 						return nil, fmt.Errorf("upload local video note bytes: %w", err)
@@ -2518,7 +2559,7 @@ func (b *BotInstance) AnswerCallbackQuery(ctx context.Context, req *converter.An
 		return false, fmt.Errorf("invalid callback_query_id: %w", err)
 	}
 
-	_, err = b.raw.MessagesSetBotCallbackAnswer(ctx, &tg.MessagesSetBotCallbackAnswerRequest{
+	_, err = b.raw().MessagesSetBotCallbackAnswer(ctx, &tg.MessagesSetBotCallbackAnswerRequest{
 		QueryID:   queryID,
 		Message:   req.Text,
 		Alert:     req.ShowAlert,
@@ -2544,7 +2585,7 @@ func (b *BotInstance) AnswerPreCheckoutQuery(ctx context.Context, req *converter
 		Error:   req.ErrorMessage,
 	}
 
-	res, err := b.raw.MessagesSetBotPrecheckoutResults(ctx, sendReq)
+	res, err := b.raw().MessagesSetBotPrecheckoutResults(ctx, sendReq)
 	if err != nil {
 		return false, fmt.Errorf("mtproto answer pre-checkout query: %w", err)
 	}
@@ -2569,7 +2610,7 @@ func (b *BotInstance) SetMyCommands(ctx context.Context, req *converter.SetMyCom
 		sendReq.LangCode = req.LanguageCode
 	}
 
-	res, err := b.raw.BotsSetBotCommands(ctx, sendReq)
+	res, err := b.raw().BotsSetBotCommands(ctx, sendReq)
 	if err != nil {
 		return false, fmt.Errorf("mtproto set bot commands: %w", err)
 	}
@@ -2588,7 +2629,7 @@ func (b *BotInstance) GetChatMember(ctx context.Context, req *converter.GetChatM
 		if err != nil {
 			return nil, fmt.Errorf("resolve user: %w", err)
 		}
-		res, err := b.raw.ChannelsGetParticipant(ctx, &tg.ChannelsGetParticipantRequest{
+		res, err := b.raw().ChannelsGetParticipant(ctx, &tg.ChannelsGetParticipantRequest{
 			Channel:     &tg.InputChannel{ChannelID: chat.ChannelID, AccessHash: chat.AccessHash},
 			Participant: participant,
 		})
@@ -2599,7 +2640,7 @@ func (b *BotInstance) GetChatMember(ctx context.Context, req *converter.GetChatM
 		member := converter.ConvertChannelParticipant(res.Participant, req.UserID, entities)
 		return &member, nil
 	case *tg.InputPeerChat:
-		res, err := b.raw.MessagesGetFullChat(ctx, chat.ChatID)
+		res, err := b.raw().MessagesGetFullChat(ctx, chat.ChatID)
 		if err != nil {
 			return nil, fmt.Errorf("get full chat: %w", err)
 		}
@@ -2890,7 +2931,7 @@ func (b *BotInstance) SendAudio(ctx context.Context, req *converter.SendAudioReq
 		if fileName == "" {
 			fileName = "audio.mp3"
 		}
-		u := uploader.NewUploader(b.raw)
+		u := uploader.NewUploader(b.raw())
 		inputFile, err := u.FromBytes(ctx, fileName, req.AudioData)
 		if err != nil {
 			return nil, fmt.Errorf("upload audio bytes: %w", err)
@@ -2951,7 +2992,7 @@ func (b *BotInstance) SendAudio(ctx context.Context, req *converter.SendAudioReq
 				data, err := os.ReadFile(localPath)
 				if err == nil && len(data) > 0 {
 					fileName := filepath.Base(localPath)
-					u := uploader.NewUploader(b.raw)
+					u := uploader.NewUploader(b.raw())
 					inputFile, err := u.FromBytes(ctx, fileName, data)
 					if err != nil {
 						return nil, fmt.Errorf("upload local audio bytes: %w", err)
@@ -3066,7 +3107,7 @@ func (b *BotInstance) SendSticker(ctx context.Context, req *converter.SendSticke
 		if fileName == "" {
 			fileName = "sticker.webp"
 		}
-		u := uploader.NewUploader(b.raw)
+		u := uploader.NewUploader(b.raw())
 		inputFile, err := u.FromBytes(ctx, fileName, req.StickerData)
 		if err != nil {
 			return nil, fmt.Errorf("upload sticker bytes: %w", err)
@@ -3097,7 +3138,7 @@ func (b *BotInstance) SendSticker(ctx context.Context, req *converter.SendSticke
 				data, err := os.ReadFile(localPath)
 				if err == nil && len(data) > 0 {
 					fileName := filepath.Base(localPath)
-					u := uploader.NewUploader(b.raw)
+					u := uploader.NewUploader(b.raw())
 					inputFile, err := u.FromBytes(ctx, fileName, data)
 					if err != nil {
 						return nil, fmt.Errorf("upload local sticker bytes: %w", err)
@@ -3216,7 +3257,7 @@ func (b *BotInstance) SendAnimation(ctx context.Context, req *converter.SendAnim
 		if fileName == "" {
 			fileName = "animation.mp4"
 		}
-		u := uploader.NewUploader(b.raw)
+		u := uploader.NewUploader(b.raw())
 		inputFile, err := u.FromBytes(ctx, fileName, req.AnimationData)
 		if err != nil {
 			return nil, fmt.Errorf("upload animation bytes: %w", err)
@@ -3276,7 +3317,7 @@ func (b *BotInstance) SendAnimation(ctx context.Context, req *converter.SendAnim
 				data, err := os.ReadFile(localPath)
 				if err == nil && len(data) > 0 {
 					fileName := filepath.Base(localPath)
-					u := uploader.NewUploader(b.raw)
+					u := uploader.NewUploader(b.raw())
 					inputFile, err := u.FromBytes(ctx, fileName, data)
 					if err != nil {
 						return nil, fmt.Errorf("upload local animation bytes: %w", err)
@@ -3423,7 +3464,7 @@ func (b *BotInstance) DownloadFile(ctx context.Context, fileIDStr string, w io.W
 	}
 
 	d := downloader.NewDownloader()
-	_, err = d.Download(b.raw, loc).Stream(ctx, w)
+	_, err = d.Download(b.raw(), loc).Stream(ctx, w)
 	return err
 }
 
@@ -3445,7 +3486,7 @@ func (b *BotInstance) GetUserProfilePhotos(ctx context.Context, req *converter.G
 		limit = 100
 	}
 
-	photosRes, err := b.raw.PhotosGetUserPhotos(ctx, &tg.PhotosGetUserPhotosRequest{
+	photosRes, err := b.raw().PhotosGetUserPhotos(ctx, &tg.PhotosGetUserPhotosRequest{
 		UserID: inputUser,
 		Offset: req.Offset,
 		Limit:  limit,
@@ -3618,7 +3659,7 @@ func (b *BotInstance) resolveInputSingleMedia(ctx context.Context, peer tg.Input
 
 	// 3. If it's a photo URL, try MessagesUploadMedia with PhotoExternal first
 	if isURL && !isVideo && !isAudio && !isDoc {
-		res, err := b.raw.MessagesUploadMedia(ctx, &tg.MessagesUploadMediaRequest{
+		res, err := b.raw().MessagesUploadMedia(ctx, &tg.MessagesUploadMediaRequest{
 			BusinessConnectionID: businessConnectionID,
 			Peer:                 peer,
 			Media: &tg.InputMediaPhotoExternal{
@@ -3702,7 +3743,7 @@ func (b *BotInstance) resolveInputSingleMedia(ctx context.Context, peer tg.Input
 				attrs = append(attrs, &tg.DocumentAttributeFilename{FileName: fileName})
 			}
 
-			res, err := b.raw.MessagesUploadMedia(ctx, &tg.MessagesUploadMediaRequest{
+			res, err := b.raw().MessagesUploadMedia(ctx, &tg.MessagesUploadMediaRequest{
 				BusinessConnectionID: businessConnectionID,
 				Peer:                 peer,
 				Media: &tg.InputMediaUploadedDocument{
@@ -3734,7 +3775,7 @@ func (b *BotInstance) resolveInputSingleMedia(ctx context.Context, peer tg.Input
 		}
 
 		// Photo branch (image/* detected from Content-Type)
-		res, err := b.raw.MessagesUploadMedia(ctx, &tg.MessagesUploadMediaRequest{
+		res, err := b.raw().MessagesUploadMedia(ctx, &tg.MessagesUploadMediaRequest{
 			BusinessConnectionID: businessConnectionID,
 			Peer:                 peer,
 			Media: &tg.InputMediaUploadedPhoto{
@@ -3783,7 +3824,7 @@ func (b *BotInstance) resolveInputSingleMedia(ctx context.Context, peer tg.Input
 		}
 	}
 
-	u := uploader.NewUploader(b.raw)
+	u := uploader.NewUploader(b.raw())
 	if isVideo || isAudio || isDoc {
 		mimeType := "video/mp4"
 		if fileName == "" {
@@ -3823,7 +3864,7 @@ func (b *BotInstance) resolveInputSingleMedia(ctx context.Context, peer tg.Input
 			return nil, fmt.Errorf("upload bytes: %w", err)
 		}
 
-		res, err := b.raw.MessagesUploadMedia(ctx, &tg.MessagesUploadMediaRequest{
+		res, err := b.raw().MessagesUploadMedia(ctx, &tg.MessagesUploadMediaRequest{
 			BusinessConnectionID: businessConnectionID,
 			Peer:                 peer,
 			Media: &tg.InputMediaUploadedDocument{
@@ -3863,7 +3904,7 @@ func (b *BotInstance) resolveInputSingleMedia(ctx context.Context, peer tg.Input
 		return nil, fmt.Errorf("upload photo bytes: %w", err)
 	}
 
-	res, err := b.raw.MessagesUploadMedia(ctx, &tg.MessagesUploadMediaRequest{
+	res, err := b.raw().MessagesUploadMedia(ctx, &tg.MessagesUploadMediaRequest{
 		BusinessConnectionID: businessConnectionID,
 		Peer:                 peer,
 		Media: &tg.InputMediaUploadedPhoto{
@@ -3953,7 +3994,7 @@ func (b *BotInstance) SendMediaGroup(ctx context.Context, req *converter.SendMed
 		}
 		updates = box.Updates
 	} else {
-		updates, err = b.raw.MessagesSendMultiMedia(ctx, sendReq)
+		updates, err = b.raw().MessagesSendMultiMedia(ctx, sendReq)
 		if err != nil {
 			return nil, fmt.Errorf("mtproto send media group: %w", err)
 		}

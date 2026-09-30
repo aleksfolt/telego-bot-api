@@ -85,7 +85,7 @@ func (b *BotInstance) hideChatJoinRequest(ctx context.Context, chatID, userID in
 	if err != nil {
 		return false, fmt.Errorf("resolve peer: %w", err)
 	}
-	_, err = b.raw.MessagesHideChatJoinRequest(ctx, &tg.MessagesHideChatJoinRequestRequest{
+	_, err = b.raw().MessagesHideChatJoinRequest(ctx, &tg.MessagesHideChatJoinRequestRequest{
 		Approved: approved, Peer: peer, UserID: b.inputUser(userID),
 	})
 	return err == nil, err
@@ -98,7 +98,7 @@ func (b *BotInstance) editGeneralForumTopic(ctx context.Context, chatID int64, c
 	}
 	request := &tg.MessagesEditForumTopicRequest{Peer: peer, TopicID: 1}
 	configure(request)
-	_, err = b.raw.MessagesEditForumTopic(ctx, request)
+	_, err = b.raw().MessagesEditForumTopic(ctx, request)
 	return err == nil, err
 }
 
@@ -234,13 +234,13 @@ func (b *BotInstance) uploadStickerDocument(ctx context.Context, data []byte, fi
 	case "video":
 		mimeType = "video/webm"
 	}
-	input, err := uploader.NewUploader(b.raw).FromBytes(ctx, fileName, data)
+	input, err := uploader.NewUploader(b.raw()).FromBytes(ctx, fileName, data)
 	if err != nil {
 		return nil, err
 	}
 	media := &tg.InputMediaUploadedDocument{File: input, MimeType: mimeType, ForceFile: true,
 		Attributes: []tg.DocumentAttributeClass{&tg.DocumentAttributeFilename{FileName: fileName}}}
-	result, err := b.raw.MessagesUploadMedia(ctx, &tg.MessagesUploadMediaRequest{Peer: &tg.InputPeerSelf{}, Media: media})
+	result, err := b.raw().MessagesUploadMedia(ctx, &tg.MessagesUploadMediaRequest{Peer: &tg.InputPeerSelf{}, Media: media})
 	if err != nil {
 		return nil, err
 	}
@@ -540,7 +540,7 @@ func (b *BotInstance) sendMediaMessage(ctx context.Context, peer tg.InputPeerCla
 		}
 		return box.Updates, nil
 	}
-	return b.raw.MessagesSendMedia(ctx, request)
+	return b.raw().MessagesSendMedia(ctx, request)
 }
 
 func (b *BotInstance) editMessageMedia(ctx context.Context, connectionID string, peer tg.InputPeerClass, messageID int64,
@@ -563,7 +563,7 @@ func (b *BotInstance) editMessageMedia(ctx context.Context, connectionID string,
 		if markup != nil {
 			request.SetReplyMarkup(markup)
 		}
-		_, err = b.raw.MessagesEditInlineBotMessage(ctx, request)
+		_, err = b.raw().MessagesEditInlineBotMessage(ctx, request)
 		return err
 	}
 	request := &tg.MessagesEditMessageRequest{Peer: peer, ID: int(messageID)}
@@ -575,7 +575,7 @@ func (b *BotInstance) editMessageMedia(ctx context.Context, connectionID string,
 		var box tg.UpdatesBox
 		return b.invokeBusiness(ctx, connectionID, request, &box)
 	}
-	_, err = b.raw.MessagesEditMessage(ctx, request)
+	_, err = b.raw().MessagesEditMessage(ctx, request)
 	return err
 }
 
@@ -652,7 +652,7 @@ func (b *BotInstance) GetChat(ctx context.Context, chatID int64) (*converter.Cha
 	}
 	switch cp := peer.(type) {
 	case *tg.InputPeerChannel:
-		res, err := b.raw.ChannelsGetFullChannel(ctx, &tg.InputChannel{ChannelID: cp.ChannelID, AccessHash: cp.AccessHash})
+		res, err := b.raw().ChannelsGetFullChannel(ctx, &tg.InputChannel{ChannelID: cp.ChannelID, AccessHash: cp.AccessHash})
 		if err != nil {
 			return nil, err
 		}
@@ -671,7 +671,7 @@ func (b *BotInstance) GetChat(ctx context.Context, chatID int64) (*converter.Cha
 		}
 		return info, nil
 	case *tg.InputPeerUser:
-		res, err := b.raw.UsersGetFullUser(ctx, &tg.InputUser{UserID: cp.UserID, AccessHash: cp.AccessHash})
+		res, err := b.raw().UsersGetFullUser(ctx, &tg.InputUser{UserID: cp.UserID, AccessHash: cp.AccessHash})
 		if err != nil {
 			return nil, err
 		}
@@ -684,7 +684,7 @@ func (b *BotInstance) GetChat(ctx context.Context, chatID int64) (*converter.Cha
 		}
 		return info, nil
 	case *tg.InputPeerChat:
-		res, err := b.raw.MessagesGetFullChat(ctx, cp.ChatID)
+		res, err := b.raw().MessagesGetFullChat(ctx, cp.ChatID)
 		if err != nil {
 			return nil, err
 		}
@@ -725,7 +725,7 @@ func (b *BotInstance) ForwardMessage(ctx context.Context, req *converter.Forward
 		Noforwards: req.ProtectContent,
 	}
 
-	updates, err := b.raw.MessagesForwardMessages(ctx, sendReq)
+	updates, err := b.raw().MessagesForwardMessages(ctx, sendReq)
 	if err != nil {
 		return nil, fmt.Errorf("mtproto forward message: %w", err)
 	}
@@ -782,7 +782,7 @@ func (b *BotInstance) ForwardMessages(ctx context.Context, req *converter.Forwar
 		Noforwards: req.ProtectContent,
 	}
 
-	updates, err := b.raw.MessagesForwardMessages(ctx, sendReq)
+	updates, err := b.raw().MessagesForwardMessages(ctx, sendReq)
 	if err != nil {
 		return nil, fmt.Errorf("mtproto forward messages: %w", err)
 	}
@@ -833,7 +833,7 @@ func (b *BotInstance) CopyMessages(ctx context.Context, req *converter.CopyMessa
 		Noforwards: req.ProtectContent,
 	}
 
-	updates, err := b.raw.MessagesForwardMessages(ctx, sendReq)
+	updates, err := b.raw().MessagesForwardMessages(ctx, sendReq)
 	if err != nil {
 		return nil, fmt.Errorf("mtproto copy messages: %w", err)
 	}
@@ -868,7 +868,7 @@ func (b *BotInstance) DeleteMessages(ctx context.Context, chatID int64, messageI
 	}
 
 	if cp, ok := peer.(*tg.InputPeerChannel); ok {
-		_, err := b.raw.ChannelsDeleteMessages(ctx, &tg.ChannelsDeleteMessagesRequest{
+		_, err := b.raw().ChannelsDeleteMessages(ctx, &tg.ChannelsDeleteMessagesRequest{
 			Channel: &tg.InputChannel{ChannelID: cp.ChannelID, AccessHash: cp.AccessHash},
 			ID:      ids,
 		})
@@ -876,7 +876,7 @@ func (b *BotInstance) DeleteMessages(ctx context.Context, chatID int64, messageI
 			return false, fmt.Errorf("mtproto channels delete messages: %w", err)
 		}
 	} else {
-		_, err := b.raw.MessagesDeleteMessages(ctx, &tg.MessagesDeleteMessagesRequest{
+		_, err := b.raw().MessagesDeleteMessages(ctx, &tg.MessagesDeleteMessagesRequest{
 			Revoke: true,
 			ID:     ids,
 		})
@@ -909,7 +909,7 @@ func (b *BotInstance) SetMessageReaction(ctx context.Context, req *converter.Set
 		}
 	}
 
-	_, err = b.raw.MessagesSendReaction(ctx, &tg.MessagesSendReactionRequest{
+	_, err = b.raw().MessagesSendReaction(ctx, &tg.MessagesSendReactionRequest{
 		Peer:     peer,
 		MsgID:    int(req.MessageID),
 		Reaction: reactions,
@@ -1142,9 +1142,9 @@ func (b *BotInstance) StopPoll(ctx context.Context, req *converter.StopPollReque
 	ids := []tg.InputMessageClass{&tg.InputMessageID{ID: int(req.MessageID)}}
 	var history tg.MessagesMessagesClass
 	if channelPeer, ok := peer.(*tg.InputPeerChannel); ok {
-		history, err = b.raw.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{Channel: &tg.InputChannel{ChannelID: channelPeer.ChannelID, AccessHash: channelPeer.AccessHash}, ID: ids})
+		history, err = b.raw().ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{Channel: &tg.InputChannel{ChannelID: channelPeer.ChannelID, AccessHash: channelPeer.AccessHash}, ID: ids})
 	} else {
-		history, err = b.raw.MessagesGetMessages(ctx, ids)
+		history, err = b.raw().MessagesGetMessages(ctx, ids)
 	}
 	if err != nil {
 		return nil, err
@@ -1179,7 +1179,7 @@ func (b *BotInstance) StopPoll(ctx context.Context, req *converter.StopPollReque
 		}
 		edit.SetReplyMarkup(markup)
 	}
-	_, err = b.raw.MessagesEditMessage(ctx, edit)
+	_, err = b.raw().MessagesEditMessage(ctx, edit)
 	if err != nil {
 		return nil, err
 	}
@@ -1228,7 +1228,7 @@ func (b *BotInstance) PinChatMessage(ctx context.Context, req *converter.PinChat
 		var res tg.UpdatesBox
 		err = b.invokeBusiness(ctx, req.BusinessConnectionID, pinReq, &res)
 	} else {
-		_, err = b.raw.MessagesUpdatePinnedMessage(ctx, pinReq)
+		_, err = b.raw().MessagesUpdatePinnedMessage(ctx, pinReq)
 	}
 	return err == nil, err
 }
@@ -1250,7 +1250,7 @@ func (b *BotInstance) UnpinChatMessage(ctx context.Context, req *converter.Unpin
 		var res tg.UpdatesBox
 		err = b.invokeBusiness(ctx, req.BusinessConnectionID, unpinReq, &res)
 	} else {
-		_, err = b.raw.MessagesUpdatePinnedMessage(ctx, unpinReq)
+		_, err = b.raw().MessagesUpdatePinnedMessage(ctx, unpinReq)
 	}
 	return err == nil, err
 }
@@ -1262,7 +1262,7 @@ func (b *BotInstance) UnpinAllChatMessages(ctx context.Context, chatID int64) (b
 		return false, fmt.Errorf("resolve peer: %w", err)
 	}
 
-	_, err = b.raw.MessagesUnpinAllMessages(ctx, &tg.MessagesUnpinAllMessagesRequest{
+	_, err = b.raw().MessagesUnpinAllMessages(ctx, &tg.MessagesUnpinAllMessagesRequest{
 		Peer: peer,
 	})
 	return err == nil, err
@@ -1276,12 +1276,12 @@ func (b *BotInstance) LeaveChat(ctx context.Context, chatID int64) (bool, error)
 	}
 
 	if cp, ok := peer.(*tg.InputPeerChannel); ok {
-		_, err = b.raw.ChannelsLeaveChannel(ctx, &tg.InputChannel{ChannelID: cp.ChannelID, AccessHash: cp.AccessHash})
+		_, err = b.raw().ChannelsLeaveChannel(ctx, &tg.InputChannel{ChannelID: cp.ChannelID, AccessHash: cp.AccessHash})
 		if err != nil {
 			return false, err
 		}
 	} else if cp, ok := peer.(*tg.InputPeerChat); ok {
-		_, err = b.raw.MessagesDeleteChatUser(ctx, &tg.MessagesDeleteChatUserRequest{
+		_, err = b.raw().MessagesDeleteChatUser(ctx, &tg.MessagesDeleteChatUserRequest{
 			ChatID: cp.ChatID,
 			UserID: &tg.InputUserSelf{},
 		})
@@ -1302,7 +1302,7 @@ func (b *BotInstance) GetChatAdministrators(ctx context.Context, chatID int64) (
 	}
 	switch cp := peer.(type) {
 	case *tg.InputPeerChannel:
-		res, err := b.raw.ChannelsGetParticipants(ctx, &tg.ChannelsGetParticipantsRequest{
+		res, err := b.raw().ChannelsGetParticipants(ctx, &tg.ChannelsGetParticipantsRequest{
 			Channel: &tg.InputChannel{ChannelID: cp.ChannelID, AccessHash: cp.AccessHash},
 			Filter:  &tg.ChannelParticipantsAdmins{}, Limit: 200,
 		})
@@ -1324,7 +1324,7 @@ func (b *BotInstance) GetChatAdministrators(ctx context.Context, chatID int64) (
 		}
 		return list, nil
 	case *tg.InputPeerChat:
-		full, err := b.raw.MessagesGetFullChat(ctx, cp.ChatID)
+		full, err := b.raw().MessagesGetFullChat(ctx, cp.ChatID)
 		if err != nil {
 			return nil, err
 		}
@@ -1359,7 +1359,7 @@ func (b *BotInstance) GetChatMemberCount(ctx context.Context, chatID int64) (int
 	}
 	switch cp := peer.(type) {
 	case *tg.InputPeerChannel:
-		res, err := b.raw.ChannelsGetFullChannel(ctx, &tg.InputChannel{ChannelID: cp.ChannelID, AccessHash: cp.AccessHash})
+		res, err := b.raw().ChannelsGetFullChannel(ctx, &tg.InputChannel{ChannelID: cp.ChannelID, AccessHash: cp.AccessHash})
 		if err != nil {
 			return 0, err
 		}
@@ -1369,7 +1369,7 @@ func (b *BotInstance) GetChatMemberCount(ctx context.Context, chatID int64) (int
 		}
 		return full.ParticipantsCount, nil
 	case *tg.InputPeerChat:
-		res, err := b.raw.MessagesGetFullChat(ctx, cp.ChatID)
+		res, err := b.raw().MessagesGetFullChat(ctx, cp.ChatID)
 		if err != nil {
 			return 0, err
 		}
@@ -1402,7 +1402,7 @@ func (b *BotInstance) BanChatMember(ctx context.Context, req *converter.BanChatM
 		} else {
 			inputUser = &tg.InputUser{UserID: req.UserID}
 		}
-		_, err = b.raw.ChannelsEditBanned(ctx, &tg.ChannelsEditBannedRequest{
+		_, err = b.raw().ChannelsEditBanned(ctx, &tg.ChannelsEditBannedRequest{
 			Channel:     &tg.InputChannel{ChannelID: cp.ChannelID, AccessHash: cp.AccessHash},
 			Participant: &tg.InputPeerUser{UserID: req.UserID},
 			BannedRights: tg.ChatBannedRights{
@@ -1424,7 +1424,7 @@ func (b *BotInstance) UnbanChatMember(ctx context.Context, req *converter.UnbanC
 	}
 
 	if cp, ok := peer.(*tg.InputPeerChannel); ok {
-		_, err = b.raw.ChannelsEditBanned(ctx, &tg.ChannelsEditBannedRequest{
+		_, err = b.raw().ChannelsEditBanned(ctx, &tg.ChannelsEditBannedRequest{
 			Channel:      &tg.InputChannel{ChannelID: cp.ChannelID, AccessHash: cp.AccessHash},
 			Participant:  &tg.InputPeerUser{UserID: req.UserID},
 			BannedRights: tg.ChatBannedRights{},
@@ -1442,7 +1442,7 @@ func (b *BotInstance) RestrictChatMember(ctx context.Context, req *converter.Res
 	}
 
 	if cp, ok := peer.(*tg.InputPeerChannel); ok {
-		_, err = b.raw.ChannelsEditBanned(ctx, &tg.ChannelsEditBannedRequest{
+		_, err = b.raw().ChannelsEditBanned(ctx, &tg.ChannelsEditBannedRequest{
 			Channel:     &tg.InputChannel{ChannelID: cp.ChannelID, AccessHash: cp.AccessHash},
 			Participant: &tg.InputPeerUser{UserID: req.UserID},
 			BannedRights: tg.ChatBannedRights{
@@ -1468,7 +1468,7 @@ func (b *BotInstance) PromoteChatMember(ctx context.Context, req *converter.Prom
 	}
 
 	if cp, ok := peer.(*tg.InputPeerChannel); ok {
-		_, err = b.raw.ChannelsEditAdmin(ctx, &tg.ChannelsEditAdminRequest{
+		_, err = b.raw().ChannelsEditAdmin(ctx, &tg.ChannelsEditAdminRequest{
 			Channel: &tg.InputChannel{ChannelID: cp.ChannelID, AccessHash: cp.AccessHash},
 			UserID:  &tg.InputUser{UserID: req.UserID},
 			AdminRights: tg.ChatAdminRights{
@@ -1499,7 +1499,7 @@ func (b *BotInstance) SetChatAdministratorCustomTitle(ctx context.Context, req *
 	}
 
 	if cp, ok := peer.(*tg.InputPeerChannel); ok {
-		participant, err := b.raw.ChannelsGetParticipant(ctx, &tg.ChannelsGetParticipantRequest{
+		participant, err := b.raw().ChannelsGetParticipant(ctx, &tg.ChannelsGetParticipantRequest{
 			Channel: &tg.InputChannel{ChannelID: cp.ChannelID, AccessHash: cp.AccessHash}, Participant: &tg.InputPeerUser{UserID: req.UserID},
 		})
 		if err != nil {
@@ -1509,7 +1509,7 @@ func (b *BotInstance) SetChatAdministratorCustomTitle(ctx context.Context, req *
 		if !ok {
 			return false, fmt.Errorf("user is not an administrator")
 		}
-		_, err = b.raw.ChannelsEditAdmin(ctx, &tg.ChannelsEditAdminRequest{
+		_, err = b.raw().ChannelsEditAdmin(ctx, &tg.ChannelsEditAdminRequest{
 			Channel:     &tg.InputChannel{ChannelID: cp.ChannelID, AccessHash: cp.AccessHash},
 			UserID:      &tg.InputUser{UserID: req.UserID},
 			AdminRights: admin.AdminRights,
@@ -1534,7 +1534,7 @@ func (b *BotInstance) BanChatSenderChat(ctx context.Context, chatID, senderChatI
 	if err != nil {
 		return false, fmt.Errorf("resolve sender chat: %w", err)
 	}
-	_, err = b.raw.ChannelsEditBanned(ctx, &tg.ChannelsEditBannedRequest{
+	_, err = b.raw().ChannelsEditBanned(ctx, &tg.ChannelsEditBannedRequest{
 		Channel: channel, Participant: sender,
 		BannedRights: tg.ChatBannedRights{ViewMessages: true, SendMessages: true, UntilDate: 0},
 	})
@@ -1555,7 +1555,7 @@ func (b *BotInstance) UnbanChatSenderChat(ctx context.Context, chatID, senderCha
 	if err != nil {
 		return false, fmt.Errorf("resolve sender chat: %w", err)
 	}
-	_, err = b.raw.ChannelsEditBanned(ctx, &tg.ChannelsEditBannedRequest{
+	_, err = b.raw().ChannelsEditBanned(ctx, &tg.ChannelsEditBannedRequest{
 		Channel: channel, Participant: sender, BannedRights: tg.ChatBannedRights{},
 	})
 	return err == nil, err
@@ -1568,7 +1568,7 @@ func (b *BotInstance) SetChatPermissions(ctx context.Context, req *converter.Set
 		return false, fmt.Errorf("resolve peer: %w", err)
 	}
 
-	_, err = b.raw.MessagesEditChatDefaultBannedRights(ctx, &tg.MessagesEditChatDefaultBannedRightsRequest{
+	_, err = b.raw().MessagesEditChatDefaultBannedRights(ctx, &tg.MessagesEditChatDefaultBannedRightsRequest{
 		Peer: peer,
 		BannedRights: tg.ChatBannedRights{
 			SendMessages: !req.Permissions.CanSendMessages,
@@ -1589,7 +1589,7 @@ func (b *BotInstance) ExportChatInviteLink(ctx context.Context, chatID int64) (s
 		return "", fmt.Errorf("resolve peer: %w", err)
 	}
 
-	res, err := b.raw.MessagesExportChatInvite(ctx, &tg.MessagesExportChatInviteRequest{
+	res, err := b.raw().MessagesExportChatInvite(ctx, &tg.MessagesExportChatInviteRequest{
 		Peer: peer, LegacyRevokePermanent: true,
 	})
 	if err != nil {
@@ -1607,7 +1607,7 @@ func (b *BotInstance) CreateChatInviteLink(ctx context.Context, req *converter.C
 	if err != nil {
 		return nil, fmt.Errorf("resolve peer: %w", err)
 	}
-	invite, err := b.raw.MessagesExportChatInvite(ctx, &tg.MessagesExportChatInviteRequest{
+	invite, err := b.raw().MessagesExportChatInvite(ctx, &tg.MessagesExportChatInviteRequest{
 		Peer: peer, ExpireDate: req.ExpireDate, UsageLimit: req.MemberLimit,
 		RequestNeeded: req.CreatesJoinRequest, Title: req.Name,
 	})
@@ -1629,7 +1629,7 @@ func (b *BotInstance) CreateChatSubscriptionInviteLink(ctx context.Context, req 
 	}
 	request := &tg.MessagesExportChatInviteRequest{Peer: peer, Title: req.Name}
 	request.SetSubscriptionPricing(tg.StarsSubscriptionPricing{Period: req.SubscriptionPeriod, Amount: req.SubscriptionPrice})
-	invite, err := b.raw.MessagesExportChatInvite(ctx, request)
+	invite, err := b.raw().MessagesExportChatInvite(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -1648,7 +1648,7 @@ func (b *BotInstance) EditChatSubscriptionInviteLink(ctx context.Context, req *c
 	}
 	request := &tg.MessagesEditExportedChatInviteRequest{Peer: peer, Link: req.InviteLink}
 	request.SetTitle(req.Name)
-	result, err := b.raw.MessagesEditExportedChatInvite(ctx, request)
+	result, err := b.raw().MessagesEditExportedChatInvite(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -1669,7 +1669,7 @@ func (b *BotInstance) EditChatInviteLink(ctx context.Context, req *converter.Edi
 	if err != nil {
 		return nil, fmt.Errorf("resolve peer: %w", err)
 	}
-	result, err := b.raw.MessagesEditExportedChatInvite(ctx, &tg.MessagesEditExportedChatInviteRequest{
+	result, err := b.raw().MessagesEditExportedChatInvite(ctx, &tg.MessagesEditExportedChatInviteRequest{
 		Peer: peer, Link: req.InviteLink, ExpireDate: req.ExpireDate,
 		UsageLimit: req.MemberLimit, RequestNeeded: req.CreatesJoinRequest, Title: req.Name,
 	})
@@ -1698,7 +1698,7 @@ func (b *BotInstance) RevokeChatInviteLink(ctx context.Context, req *converter.R
 	if err != nil {
 		return nil, fmt.Errorf("resolve peer: %w", err)
 	}
-	result, err := b.raw.MessagesEditExportedChatInvite(ctx, &tg.MessagesEditExportedChatInviteRequest{
+	result, err := b.raw().MessagesEditExportedChatInvite(ctx, &tg.MessagesEditExportedChatInviteRequest{
 		Peer: peer, Link: req.InviteLink, Revoked: true,
 	})
 	if err != nil {
@@ -1747,7 +1747,7 @@ func (b *BotInstance) SetChatPhoto(ctx context.Context, req *converter.SetChatPh
 		if err != nil {
 			return false, fmt.Errorf("streaming upload chat photo: %w", err)
 		}
-		_, err = b.raw.ChannelsEditPhoto(ctx, &tg.ChannelsEditPhotoRequest{
+		_, err = b.raw().ChannelsEditPhoto(ctx, &tg.ChannelsEditPhotoRequest{
 			Channel: channel, Photo: &tg.InputChatUploadedPhoto{File: inputFile},
 		})
 		return err == nil, err
@@ -1755,11 +1755,11 @@ func (b *BotInstance) SetChatPhoto(ctx context.Context, req *converter.SetChatPh
 	if len(data) == 0 {
 		return false, fmt.Errorf("photo upload is required")
 	}
-	file, err := uploader.NewUploader(b.raw).FromBytes(ctx, "chat-photo.jpg", data)
+	file, err := uploader.NewUploader(b.raw()).FromBytes(ctx, "chat-photo.jpg", data)
 	if err != nil {
 		return false, fmt.Errorf("upload chat photo: %w", err)
 	}
-	_, err = b.raw.ChannelsEditPhoto(ctx, &tg.ChannelsEditPhotoRequest{
+	_, err = b.raw().ChannelsEditPhoto(ctx, &tg.ChannelsEditPhotoRequest{
 		Channel: channel, Photo: &tg.InputChatUploadedPhoto{File: file},
 	})
 	return err == nil, err
@@ -1775,7 +1775,7 @@ func (b *BotInstance) DeleteChatPhoto(ctx context.Context, chatID int64) (bool, 
 	if err != nil {
 		return false, err
 	}
-	_, err = b.raw.ChannelsEditPhoto(ctx, &tg.ChannelsEditPhotoRequest{
+	_, err = b.raw().ChannelsEditPhoto(ctx, &tg.ChannelsEditPhotoRequest{
 		Channel: channel, Photo: &tg.InputChatPhotoEmpty{},
 	})
 	return err == nil, err
@@ -1789,14 +1789,14 @@ func (b *BotInstance) SetChatTitle(ctx context.Context, chatID int64, title stri
 	}
 
 	if cp, ok := peer.(*tg.InputPeerChannel); ok {
-		_, err = b.raw.ChannelsEditTitle(ctx, &tg.ChannelsEditTitleRequest{
+		_, err = b.raw().ChannelsEditTitle(ctx, &tg.ChannelsEditTitleRequest{
 			Channel: &tg.InputChannel{ChannelID: cp.ChannelID, AccessHash: cp.AccessHash},
 			Title:   title,
 		})
 		return err == nil, err
 	}
 	if chat, ok := peer.(*tg.InputPeerChat); ok {
-		_, err = b.raw.MessagesEditChatTitle(ctx, &tg.MessagesEditChatTitleRequest{ChatID: chat.ChatID, Title: title})
+		_, err = b.raw().MessagesEditChatTitle(ctx, &tg.MessagesEditChatTitleRequest{ChatID: chat.ChatID, Title: title})
 		return err == nil, err
 	}
 	return false, fmt.Errorf("chat title can't be changed for private chats")
@@ -1809,7 +1809,7 @@ func (b *BotInstance) SetChatDescription(ctx context.Context, chatID int64, desc
 		return false, fmt.Errorf("resolve peer: %w", err)
 	}
 
-	result, err := b.raw.MessagesEditChatAbout(ctx, &tg.MessagesEditChatAboutRequest{
+	result, err := b.raw().MessagesEditChatAbout(ctx, &tg.MessagesEditChatAboutRequest{
 		Peer:  peer,
 		About: description,
 	})
@@ -1837,7 +1837,7 @@ func (b *BotInstance) SetChatMenuButton(ctx context.Context, req *converter.SetC
 			return false, fmt.Errorf("unsupported menu button type %q", req.MenuButton.Type)
 		}
 	}
-	return b.raw.BotsSetBotMenuButton(ctx, &tg.BotsSetBotMenuButtonRequest{UserID: user, Button: button})
+	return b.raw().BotsSetBotMenuButton(ctx, &tg.BotsSetBotMenuButtonRequest{UserID: user, Button: button})
 }
 
 // GetChatMenuButton gets the current value of the bot's menu button.
@@ -1846,7 +1846,7 @@ func (b *BotInstance) GetChatMenuButton(ctx context.Context, chatID int64) (*con
 	if chatID != 0 {
 		user = b.inputUser(chatID)
 	}
-	button, err := b.raw.BotsGetBotMenuButton(ctx, user)
+	button, err := b.raw().BotsGetBotMenuButton(ctx, user)
 	if err != nil {
 		return nil, err
 	}
@@ -1866,14 +1866,14 @@ func (b *BotInstance) GetChatMenuButton(ctx context.Context, chatID int64) (*con
 func (b *BotInstance) SetMyDefaultAdministratorRights(ctx context.Context, req *converter.SetMyDefaultAdministratorRightsRequest) (bool, error) {
 	rights := convertAdminRights(req.Rights)
 	if req.ForChannels {
-		return b.raw.BotsSetBotBroadcastDefaultAdminRights(ctx, rights)
+		return b.raw().BotsSetBotBroadcastDefaultAdminRights(ctx, rights)
 	}
-	return b.raw.BotsSetBotGroupDefaultAdminRights(ctx, rights)
+	return b.raw().BotsSetBotGroupDefaultAdminRights(ctx, rights)
 }
 
 // GetMyDefaultAdministratorRights gets default administrator rights.
 func (b *BotInstance) GetMyDefaultAdministratorRights(ctx context.Context, forChannels bool) (*converter.ChatAdministratorRights, error) {
-	full, err := b.raw.UsersGetFullUser(ctx, &tg.InputUserSelf{})
+	full, err := b.raw().UsersGetFullUser(ctx, &tg.InputUserSelf{})
 	if err != nil {
 		return nil, err
 	}
@@ -1887,7 +1887,7 @@ func (b *BotInstance) GetMyDefaultAdministratorRights(ctx context.Context, forCh
 
 // GetMyCommands gets the current list of the bot's commands.
 func (b *BotInstance) GetMyCommands(ctx context.Context, req *converter.GetMyCommandsRequest) ([]converter.BotCommand, error) {
-	res, err := b.raw.BotsGetBotCommands(ctx, &tg.BotsGetBotCommandsRequest{
+	res, err := b.raw().BotsGetBotCommands(ctx, &tg.BotsGetBotCommandsRequest{
 		Scope:    &tg.BotCommandScopeDefault{},
 		LangCode: req.LanguageCode,
 	})
@@ -1907,7 +1907,7 @@ func (b *BotInstance) GetMyCommands(ctx context.Context, req *converter.GetMyCom
 
 // DeleteMyCommands deletes the list of the bot's commands.
 func (b *BotInstance) DeleteMyCommands(ctx context.Context, req *converter.DeleteMyCommandsRequest) (bool, error) {
-	_, err := b.raw.BotsResetBotCommands(ctx, &tg.BotsResetBotCommandsRequest{
+	_, err := b.raw().BotsResetBotCommands(ctx, &tg.BotsResetBotCommandsRequest{
 		Scope:    &tg.BotCommandScopeDefault{},
 		LangCode: req.LanguageCode,
 	})
@@ -1916,7 +1916,7 @@ func (b *BotInstance) DeleteMyCommands(ctx context.Context, req *converter.Delet
 
 // SetMyName changes the bot's name.
 func (b *BotInstance) SetMyName(ctx context.Context, name, langCode string) (bool, error) {
-	_, err := b.raw.BotsSetBotInfo(ctx, &tg.BotsSetBotInfoRequest{
+	_, err := b.raw().BotsSetBotInfo(ctx, &tg.BotsSetBotInfoRequest{
 		Name:     name,
 		LangCode: langCode,
 	})
@@ -1925,7 +1925,7 @@ func (b *BotInstance) SetMyName(ctx context.Context, name, langCode string) (boo
 
 // GetMyName gets the current bot name.
 func (b *BotInstance) GetMyName(ctx context.Context, langCode string) (*converter.BotName, error) {
-	info, err := b.raw.BotsGetBotInfo(ctx, &tg.BotsGetBotInfoRequest{
+	info, err := b.raw().BotsGetBotInfo(ctx, &tg.BotsGetBotInfoRequest{
 		LangCode: langCode,
 	})
 	if err != nil {
@@ -1936,7 +1936,7 @@ func (b *BotInstance) GetMyName(ctx context.Context, langCode string) (*converte
 
 // SetMyDescription changes the bot's description.
 func (b *BotInstance) SetMyDescription(ctx context.Context, description, langCode string) (bool, error) {
-	_, err := b.raw.BotsSetBotInfo(ctx, &tg.BotsSetBotInfoRequest{
+	_, err := b.raw().BotsSetBotInfo(ctx, &tg.BotsSetBotInfoRequest{
 		About:    description,
 		LangCode: langCode,
 	})
@@ -1945,7 +1945,7 @@ func (b *BotInstance) SetMyDescription(ctx context.Context, description, langCod
 
 // GetMyDescription gets the bot's description.
 func (b *BotInstance) GetMyDescription(ctx context.Context, langCode string) (*converter.BotDescription, error) {
-	info, err := b.raw.BotsGetBotInfo(ctx, &tg.BotsGetBotInfoRequest{
+	info, err := b.raw().BotsGetBotInfo(ctx, &tg.BotsGetBotInfoRequest{
 		LangCode: langCode,
 	})
 	if err != nil {
@@ -1956,7 +1956,7 @@ func (b *BotInstance) GetMyDescription(ctx context.Context, langCode string) (*c
 
 // SetMyShortDescription changes the bot's short description.
 func (b *BotInstance) SetMyShortDescription(ctx context.Context, shortDescription, langCode string) (bool, error) {
-	_, err := b.raw.BotsSetBotInfo(ctx, &tg.BotsSetBotInfoRequest{
+	_, err := b.raw().BotsSetBotInfo(ctx, &tg.BotsSetBotInfoRequest{
 		Description: shortDescription,
 		LangCode:    langCode,
 	})
@@ -1965,7 +1965,7 @@ func (b *BotInstance) SetMyShortDescription(ctx context.Context, shortDescriptio
 
 // GetMyShortDescription gets the bot's short description.
 func (b *BotInstance) GetMyShortDescription(ctx context.Context, langCode string) (*converter.BotShortDescription, error) {
-	info, err := b.raw.BotsGetBotInfo(ctx, &tg.BotsGetBotInfoRequest{
+	info, err := b.raw().BotsGetBotInfo(ctx, &tg.BotsGetBotInfoRequest{
 		LangCode: langCode,
 	})
 	if err != nil {
@@ -1988,7 +1988,7 @@ func (b *BotInstance) SetUserEmojiStatus(ctx context.Context, req *converter.Set
 		}
 		status = emojiStatus
 	}
-	return b.raw.BotsUpdateUserEmojiStatus(ctx, &tg.BotsUpdateUserEmojiStatusRequest{
+	return b.raw().BotsUpdateUserEmojiStatus(ctx, &tg.BotsUpdateUserEmojiStatusRequest{
 		UserID: b.inputUser(req.UserID), EmojiStatus: status,
 	})
 }
@@ -2014,7 +2014,7 @@ func (b *BotInstance) CreateForumTopic(ctx context.Context, req *converter.Creat
 		}
 		request.SetIconEmojiID(iconID)
 	}
-	res, err := b.raw.MessagesCreateForumTopic(ctx, request)
+	res, err := b.raw().MessagesCreateForumTopic(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -2047,7 +2047,7 @@ func (b *BotInstance) EditForumTopic(ctx context.Context, req *converter.EditFor
 		}
 		edit.SetIconEmojiID(iconID)
 	}
-	_, err = b.raw.MessagesEditForumTopic(ctx, edit)
+	_, err = b.raw().MessagesEditForumTopic(ctx, edit)
 	return err == nil, err
 }
 
@@ -2060,7 +2060,7 @@ func (b *BotInstance) CloseForumTopic(ctx context.Context, chatID int64, threadI
 
 	edit := &tg.MessagesEditForumTopicRequest{Peer: peer, TopicID: threadID}
 	edit.SetClosed(true)
-	_, err = b.raw.MessagesEditForumTopic(ctx, edit)
+	_, err = b.raw().MessagesEditForumTopic(ctx, edit)
 	return err == nil, err
 }
 
@@ -2073,7 +2073,7 @@ func (b *BotInstance) ReopenForumTopic(ctx context.Context, chatID int64, thread
 
 	edit := &tg.MessagesEditForumTopicRequest{Peer: peer, TopicID: threadID}
 	edit.SetClosed(false)
-	_, err = b.raw.MessagesEditForumTopic(ctx, edit)
+	_, err = b.raw().MessagesEditForumTopic(ctx, edit)
 	return err == nil, err
 }
 
@@ -2084,7 +2084,7 @@ func (b *BotInstance) DeleteForumTopic(ctx context.Context, chatID int64, thread
 		return false, fmt.Errorf("resolve peer: %w", err)
 	}
 
-	_, err = b.raw.MessagesDeleteTopicHistory(ctx, &tg.MessagesDeleteTopicHistoryRequest{
+	_, err = b.raw().MessagesDeleteTopicHistory(ctx, &tg.MessagesDeleteTopicHistoryRequest{
 		Peer:     peer,
 		TopMsgID: threadID,
 	})
@@ -2099,7 +2099,7 @@ func (b *BotInstance) UnpinAllForumTopicMessages(ctx context.Context, chatID int
 	}
 	req := &tg.MessagesUnpinAllMessagesRequest{Peer: peer}
 	req.SetTopMsgID(threadID)
-	_, err = b.raw.MessagesUnpinAllMessages(ctx, req)
+	_, err = b.raw().MessagesUnpinAllMessages(ctx, req)
 	return err == nil, err
 }
 
@@ -2135,7 +2135,7 @@ func (b *BotInstance) UnpinAllGeneralForumTopicMessages(ctx context.Context, cha
 
 // GetForumTopicIconStickers gets custom emoji stickers for forum topics.
 func (b *BotInstance) GetForumTopicIconStickers(ctx context.Context) ([]converter.Sticker, error) {
-	set, err := b.raw.MessagesGetStickerSet(ctx, &tg.MessagesGetStickerSetRequest{
+	set, err := b.raw().MessagesGetStickerSet(ctx, &tg.MessagesGetStickerSetRequest{
 		Stickerset: &tg.InputStickerSetEmojiDefaultTopicIcons{}, Hash: 0,
 	})
 	if err != nil {
@@ -2154,7 +2154,7 @@ func (b *BotInstance) SetChatStickerSet(ctx context.Context, req *converter.SetC
 	if err != nil {
 		return false, err
 	}
-	return b.raw.ChannelsSetStickers(ctx, &tg.ChannelsSetStickersRequest{
+	return b.raw().ChannelsSetStickers(ctx, &tg.ChannelsSetStickersRequest{
 		Channel: channel, Stickerset: &tg.InputStickerSetShortName{ShortName: req.StickerSetName},
 	})
 }
@@ -2169,7 +2169,7 @@ func (b *BotInstance) DeleteChatStickerSet(ctx context.Context, req *converter.D
 	if err != nil {
 		return false, err
 	}
-	return b.raw.ChannelsSetStickers(ctx, &tg.ChannelsSetStickersRequest{
+	return b.raw().ChannelsSetStickers(ctx, &tg.ChannelsSetStickersRequest{
 		Channel: channel, Stickerset: &tg.InputStickerSetEmpty{},
 	})
 }
@@ -2206,7 +2206,7 @@ func (b *BotInstance) AnswerInlineQuery(ctx context.Context, req *converter.Answ
 			request.SetSwitchPm(tg.InlineBotSwitchPM{Text: button.Text, StartParam: button.StartParameter})
 		}
 	}
-	return b.raw.MessagesSetInlineBotResults(ctx, request)
+	return b.raw().MessagesSetInlineBotResults(ctx, request)
 }
 
 // AnswerWebAppQuery sets the result of an interaction with a Web App.
@@ -2215,7 +2215,7 @@ func (b *BotInstance) AnswerWebAppQuery(ctx context.Context, req *converter.Answ
 	if err != nil {
 		return nil, err
 	}
-	response, err := b.raw.MessagesSendWebViewResultMessage(ctx, &tg.MessagesSendWebViewResultMessageRequest{
+	response, err := b.raw().MessagesSendWebViewResultMessage(ctx, &tg.MessagesSendWebViewResultMessageRequest{
 		BotQueryID: req.WebAppQueryID, Result: result,
 	})
 	if err != nil {
@@ -2251,7 +2251,7 @@ func (b *BotInstance) SavePreparedInlineMessage(ctx context.Context, req *conver
 	if len(peerTypes) != 0 {
 		request.SetPeerTypes(peerTypes)
 	}
-	response, err := b.raw.MessagesSavePreparedInlineMessage(ctx, request)
+	response, err := b.raw().MessagesSavePreparedInlineMessage(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -2294,7 +2294,7 @@ func (b *BotInstance) SendInvoice(ctx context.Context, req *converter.SendInvoic
 		}
 		send.SetReplyMarkup(markup)
 	}
-	updates, err := b.raw.MessagesSendMedia(ctx, send)
+	updates, err := b.raw().MessagesSendMedia(ctx, send)
 	if err != nil {
 		return nil, err
 	}
@@ -2322,7 +2322,7 @@ func (b *BotInstance) CreateInvoiceLink(ctx context.Context, req *converter.Crea
 		}
 		return result.URL, nil
 	}
-	result, err := b.raw.PaymentsExportInvoice(ctx, media)
+	result, err := b.raw().PaymentsExportInvoice(ctx, media)
 	if err != nil {
 		return "", err
 	}
@@ -2360,7 +2360,7 @@ func (b *BotInstance) AnswerShippingQuery(ctx context.Context, req *converter.An
 	} else {
 		request.SetError(req.ErrorMessage)
 	}
-	return b.raw.MessagesSetBotShippingResults(ctx, request)
+	return b.raw().MessagesSetBotShippingResults(ctx, request)
 }
 
 // SendPaidMedia sends paid media.
@@ -2415,7 +2415,7 @@ func (b *BotInstance) SendPaidMedia(ctx context.Context, req *converter.SendPaid
 		err = b.invokeBusiness(ctx, req.BusinessConnectionID, send, &box)
 		updates = box.Updates
 	} else {
-		updates, err = b.raw.MessagesSendMedia(ctx, send)
+		updates, err = b.raw().MessagesSendMedia(ctx, send)
 	}
 	if err != nil {
 		return nil, err
@@ -2427,7 +2427,7 @@ func (b *BotInstance) SendPaidMedia(ctx context.Context, req *converter.SendPaid
 
 // RefundStarPayment refunds a Telegram Star payment.
 func (b *BotInstance) RefundStarPayment(ctx context.Context, req *converter.RefundStarPaymentRequest) (bool, error) {
-	_, err := b.raw.PaymentsRefundStarsCharge(ctx, &tg.PaymentsRefundStarsChargeRequest{
+	_, err := b.raw().PaymentsRefundStarsCharge(ctx, &tg.PaymentsRefundStarsChargeRequest{
 		UserID: b.inputUser(req.UserID), ChargeID: req.TelegramPaymentChargeID,
 	})
 	return err == nil, err
@@ -2439,7 +2439,7 @@ func (b *BotInstance) GetStarTransactions(ctx context.Context, req *converter.Ge
 	if limit == 0 {
 		limit = 100
 	}
-	result, err := b.raw.PaymentsGetStarsTransactions(ctx, &tg.PaymentsGetStarsTransactionsRequest{
+	result, err := b.raw().PaymentsGetStarsTransactions(ctx, &tg.PaymentsGetStarsTransactionsRequest{
 		Peer: &tg.InputPeerSelf{}, Offset: strconv.Itoa(req.Offset), Limit: limit,
 	})
 	if err != nil {
@@ -2517,7 +2517,7 @@ func convertStarTransaction(transaction tg.StarsTransaction, users map[int64]con
 
 // GetAvailableGifts returns available gifts.
 func (b *BotInstance) GetAvailableGifts(ctx context.Context) (interface{}, error) {
-	result, err := b.raw.PaymentsGetStarGifts(ctx, 0)
+	result, err := b.raw().PaymentsGetStarGifts(ctx, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -2568,11 +2568,11 @@ func (b *BotInstance) SendGift(ctx context.Context, req *converter.SendGiftReque
 		}
 		invoice.SetMessage(tg.TextWithEntities{Text: text, Entities: entities})
 	}
-	form, err := b.raw.PaymentsGetPaymentForm(ctx, &tg.PaymentsGetPaymentFormRequest{Invoice: invoice})
+	form, err := b.raw().PaymentsGetPaymentForm(ctx, &tg.PaymentsGetPaymentFormRequest{Invoice: invoice})
 	if err != nil {
 		return false, err
 	}
-	_, err = b.raw.PaymentsSendStarsForm(ctx, &tg.PaymentsSendStarsFormRequest{FormID: form.GetFormID(), Invoice: invoice})
+	_, err = b.raw().PaymentsSendStarsForm(ctx, &tg.PaymentsSendStarsFormRequest{FormID: form.GetFormID(), Invoice: invoice})
 	return err == nil, err
 }
 
@@ -2586,7 +2586,7 @@ func (b *BotInstance) VerifyUser(ctx context.Context, req *converter.VerifyUserR
 	if req.CustomDescription != "" {
 		request.SetCustomDescription(req.CustomDescription)
 	}
-	return b.raw.BotsSetCustomVerification(ctx, request)
+	return b.raw().BotsSetCustomVerification(ctx, request)
 }
 
 // VerifyChat verifies a chat on behalf of the organization.
@@ -2599,7 +2599,7 @@ func (b *BotInstance) VerifyChat(ctx context.Context, req *converter.VerifyChatR
 	if req.CustomDescription != "" {
 		request.SetCustomDescription(req.CustomDescription)
 	}
-	return b.raw.BotsSetCustomVerification(ctx, request)
+	return b.raw().BotsSetCustomVerification(ctx, request)
 }
 
 // RemoveUserVerification removes verification from a user.
@@ -2608,7 +2608,7 @@ func (b *BotInstance) RemoveUserVerification(ctx context.Context, req *converter
 	if err != nil {
 		return false, err
 	}
-	return b.raw.BotsSetCustomVerification(ctx, &tg.BotsSetCustomVerificationRequest{Peer: peer})
+	return b.raw().BotsSetCustomVerification(ctx, &tg.BotsSetCustomVerificationRequest{Peer: peer})
 }
 
 // RemoveChatVerification removes verification from a chat.
@@ -2617,12 +2617,12 @@ func (b *BotInstance) RemoveChatVerification(ctx context.Context, req *converter
 	if err != nil {
 		return false, err
 	}
-	return b.raw.BotsSetCustomVerification(ctx, &tg.BotsSetCustomVerificationRequest{Peer: peer})
+	return b.raw().BotsSetCustomVerification(ctx, &tg.BotsSetCustomVerificationRequest{Peer: peer})
 }
 
 // GetStickerSet returns a sticker set.
 func (b *BotInstance) GetStickerSet(ctx context.Context, req *converter.GetStickerSetRequest) (*converter.StickerSet, error) {
-	result, err := b.raw.MessagesGetStickerSet(ctx, &tg.MessagesGetStickerSetRequest{Stickerset: &tg.InputStickerSetShortName{ShortName: req.Name}})
+	result, err := b.raw().MessagesGetStickerSet(ctx, &tg.MessagesGetStickerSetRequest{Stickerset: &tg.InputStickerSetShortName{ShortName: req.Name}})
 	if err != nil {
 		return nil, err
 	}
@@ -2653,7 +2653,7 @@ func (b *BotInstance) GetCustomEmojiStickers(ctx context.Context, req *converter
 		}
 		ids = append(ids, id)
 	}
-	documents, err := b.raw.MessagesGetCustomEmojiDocuments(ctx, ids)
+	documents, err := b.raw().MessagesGetCustomEmojiDocuments(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -2705,7 +2705,7 @@ func (b *BotInstance) CreateNewStickerSet(ctx context.Context, req *converter.Cr
 	case "custom_emoji":
 		request.Emojis = true
 	}
-	_, err := b.raw.StickersCreateStickerSet(ctx, request)
+	_, err := b.raw().StickersCreateStickerSet(ctx, request)
 	return err == nil, err
 }
 
@@ -2715,7 +2715,7 @@ func (b *BotInstance) AddStickerToSet(ctx context.Context, req *converter.AddSti
 	if err != nil {
 		return false, err
 	}
-	_, err = b.raw.StickersAddStickerToSet(ctx, &tg.StickersAddStickerToSetRequest{Stickerset: &tg.InputStickerSetShortName{ShortName: req.Name}, Sticker: item})
+	_, err = b.raw().StickersAddStickerToSet(ctx, &tg.StickersAddStickerToSetRequest{Stickerset: &tg.InputStickerSetShortName{ShortName: req.Name}, Sticker: item})
 	return err == nil, err
 }
 
@@ -2725,7 +2725,7 @@ func (b *BotInstance) SetStickerPositionInSet(ctx context.Context, req *converte
 	if err != nil {
 		return false, err
 	}
-	_, err = b.raw.StickersChangeStickerPosition(ctx, &tg.StickersChangeStickerPositionRequest{Sticker: document, Position: req.Position})
+	_, err = b.raw().StickersChangeStickerPosition(ctx, &tg.StickersChangeStickerPositionRequest{Sticker: document, Position: req.Position})
 	return err == nil, err
 }
 
@@ -2735,7 +2735,7 @@ func (b *BotInstance) DeleteStickerFromSet(ctx context.Context, req *converter.D
 	if err != nil {
 		return false, err
 	}
-	_, err = b.raw.StickersRemoveStickerFromSet(ctx, document)
+	_, err = b.raw().StickersRemoveStickerFromSet(ctx, document)
 	return err == nil, err
 }
 
@@ -2749,7 +2749,7 @@ func (b *BotInstance) ReplaceStickerInSet(ctx context.Context, req *converter.Re
 	if err != nil {
 		return false, err
 	}
-	_, err = b.raw.StickersReplaceSticker(ctx, &tg.StickersReplaceStickerRequest{Sticker: oldDocument, NewSticker: item})
+	_, err = b.raw().StickersReplaceSticker(ctx, &tg.StickersReplaceStickerRequest{Sticker: oldDocument, NewSticker: item})
 	return err == nil, err
 }
 
@@ -2761,7 +2761,7 @@ func (b *BotInstance) SetStickerEmojiList(ctx context.Context, req *converter.Se
 	}
 	request := &tg.StickersChangeStickerRequest{Sticker: document}
 	request.SetEmoji(strings.Join(req.EmojiList, ""))
-	_, err = b.raw.StickersChangeSticker(ctx, request)
+	_, err = b.raw().StickersChangeSticker(ctx, request)
 	return err == nil, err
 }
 
@@ -2773,7 +2773,7 @@ func (b *BotInstance) SetStickerKeywords(ctx context.Context, req *converter.Set
 	}
 	request := &tg.StickersChangeStickerRequest{Sticker: document}
 	request.SetKeywords(strings.Join(req.Keywords, ","))
-	_, err = b.raw.StickersChangeSticker(ctx, request)
+	_, err = b.raw().StickersChangeSticker(ctx, request)
 	return err == nil, err
 }
 
@@ -2793,13 +2793,13 @@ func (b *BotInstance) SetStickerMaskPosition(ctx context.Context, req *converter
 	} else {
 		request.SetMaskCoords(tg.MaskCoords{})
 	}
-	_, err = b.raw.StickersChangeSticker(ctx, request)
+	_, err = b.raw().StickersChangeSticker(ctx, request)
 	return err == nil, err
 }
 
 // SetStickerSetTitle sets the title of a created sticker set.
 func (b *BotInstance) SetStickerSetTitle(ctx context.Context, req *converter.SetStickerSetTitleRequest) (bool, error) {
-	_, err := b.raw.StickersRenameStickerSet(ctx, &tg.StickersRenameStickerSetRequest{Stickerset: &tg.InputStickerSetShortName{ShortName: req.Name}, Title: req.Title})
+	_, err := b.raw().StickersRenameStickerSet(ctx, &tg.StickersRenameStickerSetRequest{Stickerset: &tg.InputStickerSetShortName{ShortName: req.Name}, Title: req.Title})
 	return err == nil, err
 }
 
@@ -2819,7 +2819,7 @@ func (b *BotInstance) SetStickerSetThumbnail(ctx context.Context, req *converter
 		}
 		request.SetThumb(document)
 	}
-	_, err := b.raw.StickersSetStickerSetThumb(ctx, request)
+	_, err := b.raw().StickersSetStickerSetThumb(ctx, request)
 	return err == nil, err
 }
 
@@ -2835,13 +2835,13 @@ func (b *BotInstance) SetCustomEmojiStickerSetThumbnail(ctx context.Context, req
 		}
 	}
 	request.SetThumbDocumentID(id)
-	_, err := b.raw.StickersSetStickerSetThumb(ctx, request)
+	_, err := b.raw().StickersSetStickerSetThumb(ctx, request)
 	return err == nil, err
 }
 
 // DeleteStickerSet deletes a sticker set that was created by the bot.
 func (b *BotInstance) DeleteStickerSet(ctx context.Context, req *converter.DeleteStickerSetRequest) (bool, error) {
-	return b.raw.StickersDeleteStickerSet(ctx, &tg.InputStickerSetShortName{ShortName: req.Name})
+	return b.raw().StickersDeleteStickerSet(ctx, &tg.InputStickerSetShortName{ShortName: req.Name})
 }
 
 // SendGame sends a game.
@@ -2888,7 +2888,7 @@ func (b *BotInstance) SetGameScore(ctx context.Context, req *converter.SetGameSc
 		if err != nil {
 			return nil, err
 		}
-		ok, err := b.raw.MessagesSetInlineGameScore(ctx, &tg.MessagesSetInlineGameScoreRequest{
+		ok, err := b.raw().MessagesSetInlineGameScore(ctx, &tg.MessagesSetInlineGameScoreRequest{
 			EditMessage: !req.DisableEditMessage, Force: req.Force, ID: id,
 			UserID: b.inputUser(req.UserID), Score: int(req.Score),
 		})
@@ -2901,7 +2901,7 @@ func (b *BotInstance) SetGameScore(ctx context.Context, req *converter.SetGameSc
 	if err != nil {
 		return nil, err
 	}
-	updates, err := b.raw.MessagesSetGameScore(ctx, &tg.MessagesSetGameScoreRequest{EditMessage: !req.DisableEditMessage,
+	updates, err := b.raw().MessagesSetGameScore(ctx, &tg.MessagesSetGameScoreRequest{EditMessage: !req.DisableEditMessage,
 		Force: req.Force, Peer: peer, ID: int(req.MessageID), UserID: b.inputUser(req.UserID), Score: int(req.Score)})
 	if err != nil {
 		return nil, err
@@ -2923,7 +2923,7 @@ func (b *BotInstance) GetGameHighScores(ctx context.Context, req *converter.GetG
 		if decodeErr != nil {
 			return nil, decodeErr
 		}
-		result, err = b.raw.MessagesGetInlineGameHighScores(ctx, &tg.MessagesGetInlineGameHighScoresRequest{
+		result, err = b.raw().MessagesGetInlineGameHighScores(ctx, &tg.MessagesGetInlineGameHighScoresRequest{
 			ID: id, UserID: b.inputUser(req.UserID),
 		})
 	} else {
@@ -2931,7 +2931,7 @@ func (b *BotInstance) GetGameHighScores(ctx context.Context, req *converter.GetG
 		if resolveErr != nil {
 			return nil, resolveErr
 		}
-		result, err = b.raw.MessagesGetGameHighScores(ctx, &tg.MessagesGetGameHighScoresRequest{
+		result, err = b.raw().MessagesGetGameHighScores(ctx, &tg.MessagesGetGameHighScoresRequest{
 			Peer: peer, ID: int(req.MessageID), UserID: b.inputUser(req.UserID),
 		})
 	}
@@ -3067,7 +3067,7 @@ func (b *BotInstance) SetPassportDataErrors(ctx context.Context, req *converter.
 			return false, fmt.Errorf("unsupported passport error source %q", value.Source)
 		}
 	}
-	return b.raw.UsersSetSecureValueErrors(ctx, &tg.UsersSetSecureValueErrorsRequest{ID: b.inputUser(req.UserID), Errors: errors})
+	return b.raw().UsersSetSecureValueErrors(ctx, &tg.UsersSetSecureValueErrorsRequest{ID: b.inputUser(req.UserID), Errors: errors})
 }
 
 // GetUserChatBoosts gets the list of boosts added to a chat by a user.
@@ -3076,7 +3076,7 @@ func (b *BotInstance) GetUserChatBoosts(ctx context.Context, req *converter.GetU
 	if err != nil {
 		return nil, err
 	}
-	result, err := b.raw.PremiumGetUserBoosts(ctx, &tg.PremiumGetUserBoostsRequest{Peer: peer, UserID: b.inputUser(req.UserID)})
+	result, err := b.raw().PremiumGetUserBoosts(ctx, &tg.PremiumGetUserBoostsRequest{Peer: peer, UserID: b.inputUser(req.UserID)})
 	if err != nil {
 		return nil, err
 	}
@@ -3104,13 +3104,13 @@ func (b *BotInstance) GetUserChatBoosts(ctx context.Context, req *converter.GetU
 
 // ReadBusinessConnection acknowledges reading business connection updates.
 func (b *BotInstance) ReadBusinessConnection(ctx context.Context, connectionID string) (bool, error) {
-	_, err := b.raw.AccountGetBotBusinessConnection(ctx, connectionID)
+	_, err := b.raw().AccountGetBotBusinessConnection(ctx, connectionID)
 	return err == nil, err
 }
 
 // LogOut logs out from the cloud Bot API server before launching the bot locally.
 func (b *BotInstance) LogOut(ctx context.Context) (bool, error) {
-	_, err := b.raw.AuthLogOut(ctx)
+	_, err := b.raw().AuthLogOut(ctx)
 	return err == nil, err
 }
 
@@ -3119,11 +3119,11 @@ func (b *BotInstance) SetMyProfilePhoto(ctx context.Context, data []byte) (bool,
 	if len(data) == 0 {
 		return false, fmt.Errorf("photo upload is required")
 	}
-	file, err := uploader.NewUploader(b.raw).FromBytes(ctx, "profile-photo.jpg", data)
+	file, err := uploader.NewUploader(b.raw()).FromBytes(ctx, "profile-photo.jpg", data)
 	if err != nil {
 		return false, fmt.Errorf("upload profile photo: %w", err)
 	}
-	_, err = b.raw.PhotosUploadProfilePhoto(ctx, &tg.PhotosUploadProfilePhotoRequest{
+	_, err = b.raw().PhotosUploadProfilePhoto(ctx, &tg.PhotosUploadProfilePhotoRequest{
 		File: file,
 	})
 	return err == nil, err
@@ -3131,7 +3131,7 @@ func (b *BotInstance) SetMyProfilePhoto(ctx context.Context, data []byte) (bool,
 
 // RemoveMyProfilePhoto removes profile photo of the current bot.
 func (b *BotInstance) RemoveMyProfilePhoto(ctx context.Context) (bool, error) {
-	_, err := b.raw.PhotosUpdateProfilePhoto(ctx, &tg.PhotosUpdateProfilePhotoRequest{
+	_, err := b.raw().PhotosUpdateProfilePhoto(ctx, &tg.PhotosUpdateProfilePhotoRequest{
 		ID: &tg.InputPhotoEmpty{},
 	})
 	return err == nil, err
@@ -3139,7 +3139,7 @@ func (b *BotInstance) RemoveMyProfilePhoto(ctx context.Context) (bool, error) {
 
 // GetMyStarBalance returns current bot's Star balance.
 func (b *BotInstance) GetMyStarBalance(ctx context.Context) (*converter.StarAmount, error) {
-	status, err := b.raw.PaymentsGetStarsStatus(ctx, &tg.PaymentsGetStarsStatusRequest{
+	status, err := b.raw().PaymentsGetStarsStatus(ctx, &tg.PaymentsGetStarsStatusRequest{
 		Peer: &tg.InputPeerSelf{},
 	})
 	if err != nil {
@@ -3163,7 +3163,7 @@ func (b *BotInstance) DeleteMessageReaction(ctx context.Context, req *converter.
 	if err != nil {
 		return false, fmt.Errorf("resolve peer: %w", err)
 	}
-	_, err = b.raw.MessagesSendReaction(ctx, &tg.MessagesSendReactionRequest{
+	_, err = b.raw().MessagesSendReaction(ctx, &tg.MessagesSendReactionRequest{
 		Peer:     peer,
 		MsgID:    int(req.MessageID),
 		Reaction: nil,
@@ -3177,7 +3177,7 @@ func (b *BotInstance) DeleteAllMessageReactions(ctx context.Context, req *conver
 	if err != nil {
 		return false, fmt.Errorf("resolve peer: %w", err)
 	}
-	_, err = b.raw.MessagesSendReaction(ctx, &tg.MessagesSendReactionRequest{
+	_, err = b.raw().MessagesSendReaction(ctx, &tg.MessagesSendReactionRequest{
 		Peer:     peer,
 		MsgID:    int(req.MessageID),
 		Reaction: nil,
@@ -3195,7 +3195,7 @@ func (b *BotInstance) SetChatMemberTag(ctx context.Context, req *converter.SetCh
 	if err != nil {
 		return false, err
 	}
-	_, err = b.raw.ChannelsEditAdmin(ctx, &tg.ChannelsEditAdminRequest{
+	_, err = b.raw().ChannelsEditAdmin(ctx, &tg.ChannelsEditAdminRequest{
 		Channel: channel,
 		UserID:  b.inputUser(req.UserID),
 		AdminRights: tg.ChatAdminRights{
@@ -3249,7 +3249,7 @@ func (b *BotInstance) ApproveSuggestedPost(ctx context.Context, req *converter.A
 	if req.SendDate != 0 {
 		appReq.SetScheduleDate(req.SendDate)
 	}
-	_, err = b.raw.MessagesToggleSuggestedPostApproval(ctx, appReq)
+	_, err = b.raw().MessagesToggleSuggestedPostApproval(ctx, appReq)
 	if err != nil {
 		return false, err
 	}
@@ -3270,7 +3270,7 @@ func (b *BotInstance) DeclineSuggestedPost(ctx context.Context, req *converter.D
 	if req.Comment != "" {
 		decReq.SetRejectComment(req.Comment)
 	}
-	_, err = b.raw.MessagesToggleSuggestedPostApproval(ctx, decReq)
+	_, err = b.raw().MessagesToggleSuggestedPostApproval(ctx, decReq)
 	if err != nil {
 		return false, err
 	}
@@ -3289,7 +3289,7 @@ func (b *BotInstance) ConvertGiftToStars(ctx context.Context, req *converter.Con
 		err := b.invokeBusiness(ctx, req.BusinessConnectionID, &tg.PaymentsConvertStarGiftRequest{Stargift: giftInput}, &res)
 		return err == nil, err
 	}
-	res, err := b.raw.PaymentsConvertStarGift(ctx, giftInput)
+	res, err := b.raw().PaymentsConvertStarGift(ctx, giftInput)
 	return res, err
 }
 
@@ -3313,7 +3313,7 @@ func (b *BotInstance) UpgradeGift(ctx context.Context, req *converter.UpgradeGif
 			return nil, err
 		}
 	} else {
-		if _, err := b.raw.PaymentsUpgradeStarGift(ctx, upgradeReq); err != nil {
+		if _, err := b.raw().PaymentsUpgradeStarGift(ctx, upgradeReq); err != nil {
 			return nil, err
 		}
 	}
@@ -3345,7 +3345,7 @@ func (b *BotInstance) TransferGift(ctx context.Context, req *converter.TransferG
 		}
 		return true, nil
 	}
-	_, err = b.raw.PaymentsTransferStarGift(ctx, transferReq)
+	_, err = b.raw().PaymentsTransferStarGift(ctx, transferReq)
 	return err == nil, err
 }
 
@@ -3359,7 +3359,7 @@ func (b *BotInstance) GetChatGifts(ctx context.Context, req *converter.GetChatGi
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	res, err := b.raw.PaymentsGetSavedStarGifts(ctx, &tg.PaymentsGetSavedStarGiftsRequest{
+	res, err := b.raw().PaymentsGetSavedStarGifts(ctx, &tg.PaymentsGetSavedStarGiftsRequest{
 		Peer:                peer,
 		ExcludeUnsaved:      req.ExcludeUnsaved,
 		ExcludeSaved:        req.ExcludeSaved,
@@ -3390,7 +3390,7 @@ func (b *BotInstance) GetUserGifts(ctx context.Context, req *converter.GetUserGi
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	res, err := b.raw.PaymentsGetSavedStarGifts(ctx, &tg.PaymentsGetSavedStarGiftsRequest{
+	res, err := b.raw().PaymentsGetSavedStarGifts(ctx, &tg.PaymentsGetSavedStarGiftsRequest{
 		Peer:                peer,
 		ExcludeUnlimited:    req.ExcludeUnlimited,
 		ExcludeUnique:       req.ExcludeUnique,
@@ -3566,10 +3566,10 @@ func (b *BotInstance) ReplaceManagedBotToken(ctx context.Context, userID int64) 
 
 func (b *BotInstance) exportManagedBotToken(ctx context.Context, userID int64, revoke bool) (string, error) {
 	b.touch()
-	if b.raw == nil {
+	if b.raw() == nil {
 		return "", fmt.Errorf("bot is not ready")
 	}
-	res, err := b.raw.BotsExportBotToken(ctx, &tg.BotsExportBotTokenRequest{
+	res, err := b.raw().BotsExportBotToken(ctx, &tg.BotsExportBotTokenRequest{
 		Bot:    b.inputUser(userID),
 		Revoke: revoke,
 	})
@@ -3588,7 +3588,7 @@ func (b *BotInstance) GetUserPersonalChatMessages(ctx context.Context, userID in
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	res, err := b.raw.MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
+	res, err := b.raw().MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
 		Peer:  peer,
 		Limit: limit,
 	})
@@ -3629,7 +3629,7 @@ func (b *BotInstance) GiftPremiumSubscription(ctx context.Context, req *converte
 
 // EditUserStarSubscription edits or cancels a star subscription.
 func (b *BotInstance) EditUserStarSubscription(ctx context.Context, req *converter.EditUserStarSubscriptionRequest) (bool, error) {
-	_, err := b.raw.PaymentsChangeStarsSubscription(ctx, &tg.PaymentsChangeStarsSubscriptionRequest{
+	_, err := b.raw().PaymentsChangeStarsSubscription(ctx, &tg.PaymentsChangeStarsSubscriptionRequest{
 		Peer:           &tg.InputPeerSelf{},
 		SubscriptionID: req.TelegramPaymentChargeID,
 		Canceled:       req.IsCanceled,
@@ -3750,7 +3750,7 @@ func (b *BotInstance) SendMessageDraft(ctx context.Context, req *converter.SendM
 	if req.MessageThreadID != 0 {
 		draftReq.SetReplyTo(&tg.InputReplyToMessage{ReplyToMsgID: req.MessageThreadID})
 	}
-	res, err := b.raw.MessagesSaveDraft(ctx, draftReq)
+	res, err := b.raw().MessagesSaveDraft(ctx, draftReq)
 	if err != nil {
 		return false, err
 	}

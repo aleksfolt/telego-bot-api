@@ -162,7 +162,7 @@ func (b *BotInstance) uploadFromURL(ctx context.Context, rawURL string) (tg.Inpu
 	}
 	defer src.Close()
 
-	u := uploader.NewUploader(b.raw)
+	u := uploader.NewUploader(b.raw())
 	size := src.Size() // -1 if Content-Length unknown
 
 	// gotd: size=-1 → big upload (InputFileBig); size≥0 → auto small/big by threshold.
