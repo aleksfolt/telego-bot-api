@@ -286,6 +286,27 @@ func TestConvertUpdate_BusinessConnection(t *testing.T) {
 	assert.Contains(t, string(dataDisabled), `"is_enabled":false`)
 }
 
+func TestConvertUpdate_ManagedBot(t *testing.T) {
+	c := converter.NewMTProtoConverter()
+	entities := converter.NewEntityContext([]tg.UserClass{
+		&tg.User{ID: 5884148391, FirstName: "Owner", Username: "owner"},
+		&tg.User{ID: 8000000001, FirstName: "Mirror", Username: "shadycloud42bot", Bot: true},
+	}, nil)
+
+	converted, err := c.ConvertUpdate(12, &tg.UpdateManagedBot{UserID: 5884148391, BotID: 8000000001, Qts: 1}, entities)
+	require.NoError(t, err)
+	require.NotNil(t, converted)
+	require.NotNil(t, converted.ManagedBot)
+	assert.Equal(t, int64(5884148391), converted.ManagedBot.User.ID)
+	assert.Equal(t, int64(8000000001), converted.ManagedBot.Bot.ID)
+	assert.Equal(t, "shadycloud42bot", converted.ManagedBot.Bot.Username)
+	assert.True(t, converted.ManagedBot.Bot.IsBot)
+
+	data, err := json.Marshal(converted)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"managed_bot":{"user":`)
+}
+
 func TestParseInlineKeyboard_CopyTextAndEmptyData(t *testing.T) {
 	raw := []byte(`{
 		"inline_keyboard": [

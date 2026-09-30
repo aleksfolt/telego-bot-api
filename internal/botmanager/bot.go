@@ -677,6 +677,8 @@ func updateAllowed(update *converter.Update, allowed []string) bool {
 		typeName = "chat_boost"
 	case update.PurchasedPaidMedia != nil:
 		typeName = "purchased_paid_media"
+	case update.ManagedBot != nil:
+		typeName = "managed_bot"
 	}
 	for _, value := range allowed {
 		if value == typeName {
@@ -2686,6 +2688,8 @@ func updateKind(upd *converter.Update) string {
 		return "message_reaction_count"
 	case upd.PurchasedPaidMedia != nil:
 		return "purchased_paid_media"
+	case upd.ManagedBot != nil:
+		return "managed_bot"
 	default:
 		return "update"
 	}
@@ -2710,6 +2714,13 @@ func describeUpdateSender(upd *converter.Update) string {
 	case upd.CallbackQuery != nil:
 		user = &upd.CallbackQuery.From
 		text = upd.CallbackQuery.Data
+	case upd.ManagedBot != nil:
+		user = &upd.ManagedBot.User
+		if upd.ManagedBot.Bot.Username != "" {
+			text = "@" + upd.ManagedBot.Bot.Username
+		} else {
+			text = fmt.Sprintf("bot:%d", upd.ManagedBot.Bot.ID)
+		}
 	}
 	desc := ""
 	if user != nil {
@@ -2768,6 +2779,8 @@ func updateSenderID(upd *converter.Update) int64 {
 		return upd.MessageReaction.User.ID
 	case upd.PurchasedPaidMedia != nil:
 		return upd.PurchasedPaidMedia.From.ID
+	case upd.ManagedBot != nil:
+		return upd.ManagedBot.User.ID
 	default:
 		return 0
 	}

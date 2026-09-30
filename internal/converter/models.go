@@ -462,6 +462,13 @@ type Update struct {
 	MessageReaction         *MessageReactionUpdated      `json:"message_reaction,omitempty"`
 	MessageReactionCount    *MessageReactionCountUpdated `json:"message_reaction_count,omitempty"`
 	PurchasedPaidMedia      *PaidMediaPurchased          `json:"purchased_paid_media,omitempty"`
+	ManagedBot              *ManagedBotUpdated           `json:"managed_bot,omitempty"`
+}
+
+// ManagedBotUpdated describes a bot created or changed on behalf of the manager bot.
+type ManagedBotUpdated struct {
+	User User `json:"user"`
+	Bot  User `json:"bot"`
 }
 
 // ReplyParameters describes reply parameters for messages.

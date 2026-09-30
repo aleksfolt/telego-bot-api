@@ -3546,7 +3546,7 @@ func (b *BotInstance) SetBusinessAccountProfilePhoto(ctx context.Context, req *c
 
 // GetManagedBotToken returns the token of a managed bot.
 func (b *BotInstance) GetManagedBotToken(ctx context.Context, userID int64) (string, error) {
-	return "", fmt.Errorf("getManagedBotToken is not implemented")
+	return b.exportManagedBotToken(ctx, userID, false)
 }
 
 // GetManagedBotAccessSettings returns access settings of a managed bot.
@@ -3561,7 +3561,22 @@ func (b *BotInstance) SetManagedBotAccessSettings(ctx context.Context, req *conv
 
 // ReplaceManagedBotToken replaces token of a managed bot.
 func (b *BotInstance) ReplaceManagedBotToken(ctx context.Context, userID int64) (string, error) {
-	return "", fmt.Errorf("replaceManagedBotToken is not implemented")
+	return b.exportManagedBotToken(ctx, userID, true)
+}
+
+func (b *BotInstance) exportManagedBotToken(ctx context.Context, userID int64, revoke bool) (string, error) {
+	b.touch()
+	if b.raw == nil {
+		return "", fmt.Errorf("bot is not ready")
+	}
+	res, err := b.raw.BotsExportBotToken(ctx, &tg.BotsExportBotTokenRequest{
+		Bot:    b.inputUser(userID),
+		Revoke: revoke,
+	})
+	if err != nil {
+		return "", err
+	}
+	return res.Token, nil
 }
 
 // GetUserPersonalChatMessages returns messages from personal chat with a user.

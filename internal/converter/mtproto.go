@@ -311,6 +311,13 @@ func (c *MTProtoConverter) ConvertUpdate(updateID int, u tg.UpdateClass, entitie
 			From: userFromContext(upd.UserID, entities), PaidMediaPayload: upd.Payload,
 		}}, nil
 
+	case *tg.UpdateManagedBot:
+		bot := userFromContext(upd.BotID, entities)
+		bot.IsBot = true
+		return &Update{UpdateID: updateID, ManagedBot: &ManagedBotUpdated{
+			User: userFromContext(upd.UserID, entities), Bot: bot,
+		}}, nil
+
 	case *tg.UpdateBotBusinessConnect:
 		conn := upd.Connection
 		var u User
