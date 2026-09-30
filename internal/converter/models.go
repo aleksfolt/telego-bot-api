@@ -175,6 +175,7 @@ type Message struct {
 	Venue                         *Venue                         `json:"venue,omitempty"`
 	Contact                       *Contact                       `json:"contact,omitempty"`
 	Poll                          *Poll                          `json:"poll,omitempty"`
+	Checklist                     *Checklist                     `json:"checklist,omitempty"`
 	Dice                          *Dice                          `json:"dice,omitempty"`
 	MediaGroupID                  string                         `json:"media_group_id,omitempty"`
 	AuthorSignature               string                         `json:"author_signature,omitempty"`
@@ -915,8 +916,8 @@ type SetMyProfilePhotoRequest struct {
 
 // UserProfileAudios represents user's audio files.
 type UserProfileAudios struct {
-	TotalCount int       `json:"total_count"`
-	Audios     []Message `json:"audios"`
+	TotalCount int     `json:"total_count"`
+	Audios     []Audio `json:"audios"`
 }
 
 // SetChatMemberTagRequest represents parameters for setChatMemberTag.

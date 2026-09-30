@@ -894,6 +894,9 @@ func (c *MTProtoConverter) ConvertMessage(m tg.MessageClass, entities *EntityCon
 		result.Caption = msg.Message
 		result.CaptionEntities = msgEntities
 		applyMessageMedia(result, msg.Media)
+		if todo, ok := msg.Media.(*tg.MessageMediaToDo); ok {
+			result.Checklist = ConvertChecklist(todo, entities)
+		}
 	}
 	if msg.ReplyMarkup != nil {
 		result.ReplyMarkup = ConvertMTProtoReplyMarkup(msg.ReplyMarkup)
@@ -1090,6 +1093,49 @@ func applyDocumentMedia(message *Message, document *tg.Document, media *tg.Messa
 		return
 	}
 	message.Document = &base
+}
+
+// ConvertChecklist converts a to-do list message media to a Bot API Checklist.
+func ConvertChecklist(media *tg.MessageMediaToDo, entities *EntityContext) *Checklist {
+	todo := media.Todo
+	checklist := &Checklist{
+		Title:                    todo.Title.Text,
+		TitleEntities:            ConvertMTProtoEntities(todo.Title.Entities),
+		Tasks:                    make([]ChecklistTask, 0, len(todo.List)),
+		OthersCanAddTasks:        todo.OthersCanAppend,
+		OthersCanMarkTasksAsDone: todo.OthersCanComplete,
+	}
+	completions := make(map[int]tg.TodoCompletion, len(media.Completions))
+	for _, completion := range media.Completions {
+		completions[completion.ID] = completion
+	}
+	for _, item := range todo.List {
+		task := ChecklistTask{ID: item.ID, Text: item.Title.Text, TextEntities: ConvertMTProtoEntities(item.Title.Entities)}
+		if completion, ok := completions[item.ID]; ok && completion.Date != 0 && completion.CompletedBy != nil {
+			task.CompletionDate = completion.Date
+			if peer, ok := completion.CompletedBy.(*tg.PeerUser); ok {
+				user := userFromContext(peer.UserID, entities)
+				task.CompletedByUser = &user
+			} else {
+				chat := chatFromPeer(completion.CompletedBy, entities)
+				task.CompletedByChat = &chat
+			}
+		}
+		checklist.Tasks = append(checklist.Tasks, task)
+	}
+	return checklist
+}
+
+// ConvertAudioDocument converts a music document (e.g. a profile audio) to Bot API Audio.
+// It returns nil if the document is not an audio file.
+func ConvertAudioDocument(class tg.DocumentClass) *Audio {
+	document, ok := class.AsNotEmpty()
+	if !ok {
+		return nil
+	}
+	var message Message
+	applyDocumentMedia(&message, document, &tg.MessageMediaDocument{})
+	return message.Audio
 }
 
 func applyMessageMedia(message *Message, class tg.MessageMediaClass) {

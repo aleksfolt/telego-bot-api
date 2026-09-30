@@ -3208,32 +3208,135 @@ func (b *BotInstance) SetChatMemberTag(ctx context.Context, req *converter.SetCh
 
 // GetUserProfileAudios returns profile audios for a user.
 func (b *BotInstance) GetUserProfileAudios(ctx context.Context, userID int64, offset, limit int) (*converter.UserProfileAudios, error) {
-	return nil, fmt.Errorf("getUserProfileAudios is not implemented")
+	if offset < 0 {
+		offset = 0
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	res, err := b.raw().UsersGetSavedMusic(ctx, &tg.UsersGetSavedMusicRequest{
+		ID: b.inputUser(userID), Offset: offset, Limit: limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := &converter.UserProfileAudios{Audios: []converter.Audio{}}
+	switch music := res.(type) {
+	case *tg.UsersSavedMusic:
+		result.TotalCount = music.Count
+		for _, document := range music.Documents {
+			if audio := converter.ConvertAudioDocument(document); audio != nil {
+				result.Audios = append(result.Audios, *audio)
+			}
+		}
+	case *tg.UsersSavedMusicNotModified:
+		result.TotalCount = music.Count
+	}
+	return result, nil
 }
 
 // AnswerChatJoinRequestQuery answers a chat join request query.
 func (b *BotInstance) AnswerChatJoinRequestQuery(ctx context.Context, req *converter.AnswerChatJoinRequestQueryRequest) (bool, error) {
-	return false, fmt.Errorf("answerChatJoinRequestQuery is not implemented")
+	queryID, err := parseQueryID(req.ChatJoinRequestQueryID, "chat_join_request_query_id")
+	if err != nil {
+		return false, err
+	}
+	var result tg.JoinChatBotResultClass
+	switch strings.ToLower(strings.TrimSpace(req.Result)) {
+	case "approve":
+		result = &tg.JoinChatBotResultApproved{}
+	case "decline":
+		result = &tg.JoinChatBotResultDeclined{}
+	case "queue":
+		result = &tg.JoinChatBotResultQueued{}
+	default:
+		return false, fmt.Errorf("Invalid query result specified")
+	}
+	return b.raw().BotsSetJoinChatResults(ctx, &tg.BotsSetJoinChatResultsRequest{QueryID: queryID, Result: result})
+}
+
+// parseQueryID parses a numeric query identifier that clients may send as a string or number.
+func parseQueryID(value json.Number, name string) (int64, error) {
+	id, err := value.Int64()
+	if err != nil {
+		return 0, fmt.Errorf("%s is invalid", name)
+	}
+	return id, nil
 }
 
 // SendChatJoinRequestWebApp sends a web app url for a chat join request query.
 func (b *BotInstance) SendChatJoinRequestWebApp(ctx context.Context, req *converter.SendChatJoinRequestWebAppRequest) (bool, error) {
-	return false, fmt.Errorf("sendChatJoinRequestWebApp is not implemented")
+	queryID, err := parseQueryID(req.ChatJoinRequestQueryID, "chat_join_request_query_id")
+	if err != nil {
+		return false, err
+	}
+	if req.WebAppURL == "" {
+		return false, fmt.Errorf("Parameter \"web_app_url\" is required")
+	}
+	return b.raw().BotsSetJoinChatResults(ctx, &tg.BotsSetJoinChatResultsRequest{
+		QueryID: queryID, Result: &tg.JoinChatBotResultWebView{URL: req.WebAppURL},
+	})
 }
 
 // AnswerCustomQuery answers a custom query.
 func (b *BotInstance) AnswerCustomQuery(ctx context.Context, req *converter.AnswerCustomQueryRequest) (bool, error) {
-	return false, fmt.Errorf("answerCustomQuery is not implemented")
+	queryID, err := parseQueryID(req.CustomQueryID, "custom_query_id")
+	if err != nil {
+		return false, err
+	}
+	// Like TDLib, a false result from Telegram is not an error: the query may have expired.
+	if _, err := b.raw().BotsAnswerWebhookJSONQuery(ctx, &tg.BotsAnswerWebhookJSONQueryRequest{
+		QueryID: queryID, Data: tg.DataJSON{Data: req.Data},
+	}); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // SendCustomRequest sends a custom MTProto request.
 func (b *BotInstance) SendCustomRequest(ctx context.Context, req *converter.SendCustomRequestRequest) (interface{}, error) {
-	return nil, fmt.Errorf("sendCustomRequest is not implemented")
+	if req.Method == "" {
+		return nil, fmt.Errorf("Parameter \"method\" is required")
+	}
+	// parameters is a JSON-serialized string; accept an inline JSON value as well.
+	parameters := string(req.Parameters)
+	var encoded string
+	if err := json.Unmarshal(req.Parameters, &encoded); err == nil {
+		parameters = encoded
+	}
+	res, err := b.raw().BotsSendCustomRequest(ctx, &tg.BotsSendCustomRequestRequest{
+		CustomMethod: req.Method, Params: tg.DataJSON{Data: parameters},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !json.Valid([]byte(res.Data)) {
+		return res.Data, nil
+	}
+	return json.RawMessage(res.Data), nil
 }
 
 // AnswerGuestQuery answers a guest query.
-func (b *BotInstance) AnswerGuestQuery(ctx context.Context, req *converter.AnswerGuestQueryRequest) (bool, error) {
-	return false, fmt.Errorf("answerGuestQuery is not implemented")
+func (b *BotInstance) AnswerGuestQuery(ctx context.Context, req *converter.AnswerGuestQueryRequest) (*converter.SentWebAppMessage, error) {
+	queryID, err := parseQueryID(req.GuestQueryID, "guest_query_id")
+	if err != nil {
+		return nil, err
+	}
+	result, err := buildInlineResult(req.Result)
+	if err != nil {
+		return nil, err
+	}
+	response, err := b.raw().MessagesSetBotGuestChatResult(ctx, &tg.MessagesSetBotGuestChatResultRequest{
+		QueryID: queryID, Result: result,
+	})
+	if err != nil {
+		return nil, err
+	}
+	messageID, err := encodeInlineMessageID(response)
+	if err != nil {
+		return nil, err
+	}
+	return &converter.SentWebAppMessage{InlineMessageID: messageID}, nil
 }
 
 // ApproveSuggestedPost approves a suggested post in a channel.
@@ -3277,174 +3380,6 @@ func (b *BotInstance) DeclineSuggestedPost(ctx context.Context, req *converter.D
 	return true, nil
 }
 
-// ConvertGiftToStars converts an owned star gift to Telegram Stars.
-func (b *BotInstance) ConvertGiftToStars(ctx context.Context, req *converter.ConvertGiftToStarsRequest) (bool, error) {
-	msgID, _ := strconv.Atoi(req.OwnedGiftID)
-	var giftInput tg.InputSavedStarGiftClass = &tg.InputSavedStarGiftUser{MsgID: msgID}
-	if req.OwnedGiftID != "" && msgID == 0 {
-		giftInput = &tg.InputSavedStarGiftSlug{Slug: req.OwnedGiftID}
-	}
-	if req.BusinessConnectionID != "" {
-		var res tg.BoolBox
-		err := b.invokeBusiness(ctx, req.BusinessConnectionID, &tg.PaymentsConvertStarGiftRequest{Stargift: giftInput}, &res)
-		return err == nil, err
-	}
-	res, err := b.raw().PaymentsConvertStarGift(ctx, giftInput)
-	return res, err
-}
-
-// UpgradeGift upgrades an owned star gift.
-func (b *BotInstance) UpgradeGift(ctx context.Context, req *converter.UpgradeGiftRequest) (interface{}, error) {
-	msgID, _ := strconv.Atoi(req.OwnedGiftID)
-	var giftInput tg.InputSavedStarGiftClass = &tg.InputSavedStarGiftUser{MsgID: msgID}
-	if req.OwnedGiftID != "" && msgID == 0 {
-		giftInput = &tg.InputSavedStarGiftSlug{Slug: req.OwnedGiftID}
-	}
-	upgradeReq := &tg.PaymentsUpgradeStarGiftRequest{
-		Stargift:            giftInput,
-		KeepOriginalDetails: req.KeepOriginalDetails,
-	}
-	if req.StarCount > 0 {
-		return nil, fmt.Errorf("paid gift upgrades are not implemented; refusing to report a false success")
-	}
-	if req.BusinessConnectionID != "" {
-		var updates tg.UpdatesBox
-		if err := b.invokeBusiness(ctx, req.BusinessConnectionID, upgradeReq, &updates); err != nil {
-			return nil, err
-		}
-	} else {
-		if _, err := b.raw().PaymentsUpgradeStarGift(ctx, upgradeReq); err != nil {
-			return nil, err
-		}
-	}
-	return map[string]interface{}{"ok": true}, nil
-}
-
-// TransferGift transfers an owned star gift to another user or channel.
-func (b *BotInstance) TransferGift(ctx context.Context, req *converter.TransferGiftRequest) (bool, error) {
-	if req.StarCount > 0 {
-		return false, fmt.Errorf("paid gift transfers are not implemented; refusing to report a false success")
-	}
-	msgID, _ := strconv.Atoi(req.OwnedGiftID)
-	var giftInput tg.InputSavedStarGiftClass = &tg.InputSavedStarGiftUser{MsgID: msgID}
-	if req.OwnedGiftID != "" && msgID == 0 {
-		giftInput = &tg.InputSavedStarGiftSlug{Slug: req.OwnedGiftID}
-	}
-	toPeer, err := b.resolvePeer(req.NewOwnerChatID)
-	if err != nil {
-		return false, err
-	}
-	transferReq := &tg.PaymentsTransferStarGiftRequest{
-		Stargift: giftInput,
-		ToID:     toPeer,
-	}
-	if req.BusinessConnectionID != "" {
-		var updates tg.UpdatesBox
-		if err := b.invokeBusiness(ctx, req.BusinessConnectionID, transferReq, &updates); err != nil {
-			return false, err
-		}
-		return true, nil
-	}
-	_, err = b.raw().PaymentsTransferStarGift(ctx, transferReq)
-	return err == nil, err
-}
-
-// GetChatGifts returns the list of gifts for a chat.
-func (b *BotInstance) GetChatGifts(ctx context.Context, req *converter.GetChatGiftsRequest) (*converter.UserGifts, error) {
-	peer, err := b.resolvePeer(req.ChatID)
-	if err != nil {
-		return nil, err
-	}
-	limit := req.Limit
-	if limit <= 0 || limit > 100 {
-		limit = 100
-	}
-	res, err := b.raw().PaymentsGetSavedStarGifts(ctx, &tg.PaymentsGetSavedStarGiftsRequest{
-		Peer:                peer,
-		ExcludeUnsaved:      req.ExcludeUnsaved,
-		ExcludeSaved:        req.ExcludeSaved,
-		ExcludeUnlimited:    req.ExcludeUnlimited,
-		ExcludeUnique:       req.ExcludeUnique,
-		ExcludeUpgradable:   req.ExcludeLimitedUpgradable,
-		ExcludeUnupgradable: req.ExcludeLimitedNonUpgradable,
-		SortByValue:         req.SortByPrice,
-		Offset:              req.Offset,
-		Limit:               limit,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if res.Count > 0 {
-		return nil, fmt.Errorf("getChatGifts returned %d gifts, but gift conversion is not implemented", res.Count)
-	}
-	return &converter.UserGifts{TotalCount: res.Count, Gifts: []converter.OwnedGift{}}, nil
-}
-
-// GetUserGifts returns the list of gifts for a user.
-func (b *BotInstance) GetUserGifts(ctx context.Context, req *converter.GetUserGiftsRequest) (*converter.UserGifts, error) {
-	peer, err := b.resolvePeer(req.UserID)
-	if err != nil {
-		return nil, err
-	}
-	limit := req.Limit
-	if limit <= 0 || limit > 100 {
-		limit = 100
-	}
-	res, err := b.raw().PaymentsGetSavedStarGifts(ctx, &tg.PaymentsGetSavedStarGiftsRequest{
-		Peer:                peer,
-		ExcludeUnlimited:    req.ExcludeUnlimited,
-		ExcludeUnique:       req.ExcludeUnique,
-		ExcludeUpgradable:   req.ExcludeLimitedUpgradable,
-		ExcludeUnupgradable: req.ExcludeLimitedNonUpgradable,
-		SortByValue:         req.SortByPrice,
-		Offset:              req.Offset,
-		Limit:               limit,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if res.Count > 0 {
-		return nil, fmt.Errorf("getUserGifts returned %d gifts, but gift conversion is not implemented", res.Count)
-	}
-	return &converter.UserGifts{TotalCount: res.Count, Gifts: []converter.OwnedGift{}}, nil
-}
-
-// GetBusinessAccountGifts returns the list of gifts for a business account.
-func (b *BotInstance) GetBusinessAccountGifts(ctx context.Context, req *converter.GetBusinessAccountGiftsRequest) (*converter.UserGifts, error) {
-	connection, err := b.GetBusinessConnection(ctx, req.BusinessConnectionID)
-	if err != nil {
-		return nil, err
-	}
-	peer, err := b.resolvePeer(connection.UserChatID)
-	if err != nil {
-		return nil, err
-	}
-	limit := req.Limit
-	if limit <= 0 || limit > 100 {
-		limit = 100
-	}
-	var res tg.PaymentsSavedStarGifts
-	err = b.invokeBusiness(ctx, req.BusinessConnectionID, &tg.PaymentsGetSavedStarGiftsRequest{
-		Peer:                peer,
-		ExcludeUnsaved:      req.ExcludeUnsaved,
-		ExcludeSaved:        req.ExcludeSaved,
-		ExcludeUnlimited:    req.ExcludeUnlimited,
-		ExcludeUnique:       req.ExcludeUnique,
-		ExcludeUpgradable:   req.ExcludeLimitedUpgradable,
-		ExcludeUnupgradable: req.ExcludeLimitedNonUpgradable,
-		SortByValue:         req.SortByPrice,
-		Offset:              req.Offset,
-		Limit:               limit,
-	}, &res)
-	if err != nil {
-		return nil, err
-	}
-	if res.Count > 0 {
-		return nil, fmt.Errorf("getBusinessAccountGifts returned %d gifts, but gift conversion is not implemented", res.Count)
-	}
-	return &converter.UserGifts{TotalCount: res.Count, Gifts: []converter.OwnedGift{}}, nil
-}
-
 // GetBusinessAccountStarBalance returns the Star balance of a connected business account.
 func (b *BotInstance) GetBusinessAccountStarBalance(ctx context.Context, businessConnectionID string) (*converter.StarAmount, error) {
 	connection, err := b.GetBusinessConnection(ctx, businessConnectionID)
@@ -3470,14 +3405,6 @@ func (b *BotInstance) GetBusinessAccountStarBalance(ctx context.Context, busines
 		Amount:         amount,
 		NanostarAmount: nanos,
 	}, nil
-}
-
-// TransferBusinessAccountStars transfers Stars from a business account.
-func (b *BotInstance) TransferBusinessAccountStars(ctx context.Context, req *converter.TransferBusinessAccountStarsRequest) (bool, error) {
-	if req.StarCount < 1 || req.StarCount > 10000 {
-		return false, fmt.Errorf("star_count must be between 1 and 10000")
-	}
-	return false, fmt.Errorf("business Stars transfer is not implemented; refusing to report a false success")
 }
 
 // SetBusinessAccountGiftSettings updates gift settings for a business account.
@@ -3551,12 +3478,37 @@ func (b *BotInstance) GetManagedBotToken(ctx context.Context, userID int64) (str
 
 // GetManagedBotAccessSettings returns access settings of a managed bot.
 func (b *BotInstance) GetManagedBotAccessSettings(ctx context.Context, userID int64) (*converter.ManagedBotAccessSettings, error) {
-	return nil, fmt.Errorf("getManagedBotAccessSettings is not implemented")
+	res, err := b.raw().BotsGetAccessSettings(ctx, b.inputUser(userID))
+	if err != nil {
+		return nil, err
+	}
+	b.peers.IngestPeers(res.AddUsers, nil)
+	settings := &converter.ManagedBotAccessSettings{IsAccessRestricted: res.Restricted}
+	if res.Restricted {
+		entities := converter.NewEntityContext(res.AddUsers, nil)
+		for _, class := range res.AddUsers {
+			if user, ok := class.(*tg.User); ok {
+				settings.AddedUsers = append(settings.AddedUsers, *entities.GetUser(user.ID))
+			}
+		}
+	}
+	return settings, nil
 }
 
 // SetManagedBotAccessSettings updates access settings of a managed bot.
 func (b *BotInstance) SetManagedBotAccessSettings(ctx context.Context, req *converter.SetManagedBotAccessSettingsRequest) (bool, error) {
-	return false, fmt.Errorf("setManagedBotAccessSettings is not implemented")
+	request := &tg.BotsEditAccessSettingsRequest{Restricted: req.IsAccessRestricted, Bot: b.inputUser(req.UserID)}
+	if req.IsAccessRestricted && len(req.AddedUserIDs) != 0 {
+		if len(req.AddedUserIDs) > 10 {
+			return false, fmt.Errorf("Too many users specified in added_user_ids")
+		}
+		users := make([]tg.InputUserClass, 0, len(req.AddedUserIDs))
+		for _, id := range req.AddedUserIDs {
+			users = append(users, b.inputUser(id))
+		}
+		request.SetAddUsers(users)
+	}
+	return b.raw().BotsEditAccessSettings(ctx, request)
 }
 
 // ReplaceManagedBotToken replaces token of a managed bot.
@@ -3620,11 +3572,6 @@ func (b *BotInstance) GetUserPersonalChatMessages(ctx context.Context, userID in
 		}
 	}
 	return messages, nil
-}
-
-// GiftPremiumSubscription gifts Telegram Premium subscription to a user.
-func (b *BotInstance) GiftPremiumSubscription(ctx context.Context, req *converter.GiftPremiumSubscriptionRequest) (bool, error) {
-	return false, fmt.Errorf("giftPremiumSubscription is not implemented; refusing to report a false success")
 }
 
 // EditUserStarSubscription edits or cancels a star subscription.
@@ -3709,7 +3656,38 @@ func (b *BotInstance) EditStory(ctx context.Context, req *converter.EditStoryReq
 
 // SavePreparedKeyboardButton generates and saves a prepared keyboard button.
 func (b *BotInstance) SavePreparedKeyboardButton(ctx context.Context, req *converter.SavePreparedKeyboardButtonRequest) (*converter.PreparedKeyboardButton, error) {
-	return nil, fmt.Errorf("savePreparedKeyboardButton is not implemented")
+	button, err := parseSingleKeyboardButton(req.Button)
+	if err != nil {
+		return nil, err
+	}
+	res, err := b.raw().BotsRequestWebViewButton(ctx, &tg.BotsRequestWebViewButtonRequest{
+		UserID: b.inputUser(req.UserID), Button: button,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &converter.PreparedKeyboardButton{ID: res.WebappReqID}, nil
+}
+
+// parseSingleKeyboardButton converts one Bot API KeyboardButton (a JSON object or a JSON-encoded
+// string) by reusing the reply keyboard parser.
+func parseSingleKeyboardButton(raw json.RawMessage) (tg.KeyboardButtonClass, error) {
+	var encoded string
+	if err := json.Unmarshal(raw, &encoded); err == nil {
+		raw = json.RawMessage(encoded)
+	}
+	if len(raw) == 0 || !json.Valid(raw) {
+		return nil, fmt.Errorf("Can't parse keyboard button JSON object")
+	}
+	markup, err := converter.ParseReplyMarkup([]byte(`{"keyboard":[[` + string(raw) + `]]}`))
+	if err != nil {
+		return nil, fmt.Errorf("Can't parse keyboard button: %w", err)
+	}
+	keyboard, ok := markup.(*tg.ReplyKeyboardMarkup)
+	if !ok || len(keyboard.Rows) != 1 || len(keyboard.Rows[0].Buttons) != 1 {
+		return nil, fmt.Errorf("Can't parse keyboard button")
+	}
+	return keyboard.Rows[0].Buttons[0], nil
 }
 
 // SendLivePhoto sends a live photo.
@@ -3755,49 +3733,4 @@ func (b *BotInstance) SendMessageDraft(ctx context.Context, req *converter.SendM
 		return false, err
 	}
 	return res, nil
-}
-
-// SendRichMessageDraft saves a rich message draft.
-func (b *BotInstance) SendRichMessageDraft(ctx context.Context, req *converter.SendRichMessageDraftRequest) (bool, error) {
-	return false, fmt.Errorf("sendRichMessageDraft is not implemented")
-}
-
-// SendRichMessage sends a rich message.
-func (b *BotInstance) SendRichMessage(ctx context.Context, req *converter.SendRichMessageRequest) (*converter.Message, error) {
-	return nil, fmt.Errorf("sendRichMessage is not implemented")
-}
-
-// SendChecklist sends a checklist message.
-func (b *BotInstance) SendChecklist(ctx context.Context, req *converter.SendChecklistRequest) (*converter.Message, error) {
-	return nil, fmt.Errorf("sendChecklist is not implemented")
-}
-
-// EditMessageChecklist edits a checklist message.
-func (b *BotInstance) EditMessageChecklist(ctx context.Context, req *converter.EditMessageChecklistRequest) (interface{}, error) {
-	return nil, fmt.Errorf("editMessageChecklist is not implemented")
-}
-
-// EditEphemeralMessageText edits text of an ephemeral message.
-func (b *BotInstance) EditEphemeralMessageText(ctx context.Context, req *converter.EditEphemeralMessageTextRequest) (bool, error) {
-	return false, fmt.Errorf("editEphemeralMessageText is not implemented")
-}
-
-// EditEphemeralMessageMedia edits media of an ephemeral message.
-func (b *BotInstance) EditEphemeralMessageMedia(ctx context.Context, req *converter.EditEphemeralMessageMediaRequest) (bool, error) {
-	return false, fmt.Errorf("editEphemeralMessageMedia is not implemented")
-}
-
-// EditEphemeralMessageCaption edits caption of an ephemeral message.
-func (b *BotInstance) EditEphemeralMessageCaption(ctx context.Context, req *converter.EditEphemeralMessageCaptionRequest) (bool, error) {
-	return false, fmt.Errorf("editEphemeralMessageCaption is not implemented")
-}
-
-// EditEphemeralMessageReplyMarkup edits reply markup of an ephemeral message.
-func (b *BotInstance) EditEphemeralMessageReplyMarkup(ctx context.Context, req *converter.EditEphemeralMessageReplyMarkupRequest) (bool, error) {
-	return false, fmt.Errorf("editEphemeralMessageReplyMarkup is not implemented")
-}
-
-// DeleteEphemeralMessage deletes an ephemeral message.
-func (b *BotInstance) DeleteEphemeralMessage(ctx context.Context, req *converter.DeleteEphemeralMessageRequest) (bool, error) {
-	return false, fmt.Errorf("deleteEphemeralMessage is not implemented")
 }

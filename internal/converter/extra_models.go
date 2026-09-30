@@ -1006,19 +1006,90 @@ type PreparedKeyboardButton struct {
 
 // ManagedBotAccessSettings represents access settings of a managed bot.
 type ManagedBotAccessSettings struct {
-	CanManageBot       bool    `json:"can_manage_bot"`
-	IsAccessRestricted bool    `json:"is_access_restricted"`
-	AddedUserIDs       []int64 `json:"added_user_ids,omitempty"`
+	IsAccessRestricted bool   `json:"is_access_restricted"`
+	AddedUsers         []User `json:"added_users,omitempty"`
 }
 
 // Gift represents a gift that can be sent by the bot.
 type Gift struct {
-	ID               string   `json:"id"`
-	Sticker          *Sticker `json:"sticker,omitempty"`
-	StarCount        int      `json:"star_count"`
-	UpgradeStarCount int      `json:"upgrade_star_count,omitempty"`
-	TotalCount       int      `json:"total_count,omitempty"`
-	RemainingCount   int      `json:"remaining_count,omitempty"`
+	ID                     string          `json:"id"`
+	Sticker                *Sticker        `json:"sticker,omitempty"`
+	StarCount              int64           `json:"star_count"`
+	UpgradeStarCount       int64           `json:"upgrade_star_count,omitempty"`
+	RemainingCount         *int            `json:"remaining_count,omitempty"`
+	TotalCount             *int            `json:"total_count,omitempty"`
+	PersonalRemainingCount *int            `json:"personal_remaining_count,omitempty"`
+	PersonalTotalCount     *int            `json:"personal_total_count,omitempty"`
+	PublisherChat          *Chat           `json:"publisher_chat,omitempty"`
+	IsPremium              bool            `json:"is_premium,omitempty"`
+	HasColors              bool            `json:"has_colors,omitempty"`
+	UniqueGiftVariantCount int             `json:"unique_gift_variant_count,omitempty"`
+	Background             *GiftBackground `json:"background,omitempty"`
+}
+
+// GiftBackground describes the background of a regular gift.
+type GiftBackground struct {
+	CenterColor int `json:"center_color"`
+	EdgeColor   int `json:"edge_color"`
+	TextColor   int `json:"text_color"`
+}
+
+// UniqueGift represents a gift upgraded to a unique one.
+type UniqueGift struct {
+	GiftID           string             `json:"gift_id"`
+	BaseName         string             `json:"base_name"`
+	Name             string             `json:"name"`
+	Number           int                `json:"number"`
+	Model            UniqueGiftModel    `json:"model"`
+	Symbol           UniqueGiftSymbol   `json:"symbol"`
+	Backdrop         UniqueGiftBackdrop `json:"backdrop"`
+	PublisherChat    *Chat              `json:"publisher_chat,omitempty"`
+	IsPremium        bool               `json:"is_premium,omitempty"`
+	Colors           *UniqueGiftColors  `json:"colors,omitempty"`
+	IsFromBlockchain bool               `json:"is_from_blockchain,omitempty"`
+	IsBurned         bool               `json:"is_burned,omitempty"`
+}
+
+// UniqueGiftModel describes the model of a unique gift.
+type UniqueGiftModel struct {
+	Name           string  `json:"name"`
+	Sticker        Sticker `json:"sticker"`
+	Rarity         string  `json:"rarity,omitempty"`
+	RarityPerMille int     `json:"rarity_per_mille"`
+}
+
+// UniqueGiftSymbol describes the symbol shown on the pattern of a unique gift.
+type UniqueGiftSymbol struct {
+	Name           string  `json:"name"`
+	Sticker        Sticker `json:"sticker"`
+	Rarity         string  `json:"rarity,omitempty"`
+	RarityPerMille int     `json:"rarity_per_mille"`
+}
+
+// UniqueGiftBackdrop describes the backdrop of a unique gift.
+type UniqueGiftBackdrop struct {
+	Name           string                   `json:"name"`
+	Colors         UniqueGiftBackdropColors `json:"colors"`
+	Rarity         string                   `json:"rarity,omitempty"`
+	RarityPerMille int                      `json:"rarity_per_mille"`
+}
+
+// UniqueGiftBackdropColors describes the colors of a unique gift backdrop.
+type UniqueGiftBackdropColors struct {
+	CenterColor int `json:"center_color"`
+	EdgeColor   int `json:"edge_color"`
+	SymbolColor int `json:"symbol_color"`
+	TextColor   int `json:"text_color"`
+}
+
+// UniqueGiftColors describes the profile colors granted by a unique gift.
+type UniqueGiftColors struct {
+	ModelCustomEmojiID    string `json:"model_custom_emoji_id"`
+	SymbolCustomEmojiID   string `json:"symbol_custom_emoji_id"`
+	LightThemeMainColor   int    `json:"light_theme_main_color"`
+	LightThemeOtherColors []int  `json:"light_theme_other_colors"`
+	DarkThemeMainColor    int    `json:"dark_theme_main_color"`
+	DarkThemeOtherColors  []int  `json:"dark_theme_other_colors"`
 }
 
 // Gifts represents a list of gifts.
@@ -1027,20 +1098,34 @@ type Gifts struct {
 }
 
 // OwnedGift represents a gift received by a user or chat.
+// Type is "regular" (Gift holds *Gift) or "unique" (Gift holds *UniqueGift).
 type OwnedGift struct {
-	ID            string `json:"id"`
-	Gift          Gift   `json:"gift"`
-	SendDate      int64  `json:"send_date,omitempty"`
-	SenderUser    *User  `json:"sender_user,omitempty"`
-	Text          string `json:"text,omitempty"`
-	CanBeUpgraded bool   `json:"can_be_upgraded,omitempty"`
-	IsSaved       bool   `json:"is_saved,omitempty"`
+	Type                    string          `json:"type"`
+	OwnedGiftID             string          `json:"owned_gift_id,omitempty"`
+	Gift                    interface{}     `json:"gift"`
+	SenderUser              *User           `json:"sender_user,omitempty"`
+	SenderChat              *Chat           `json:"sender_chat,omitempty"`
+	SendDate                int             `json:"send_date"`
+	Text                    string          `json:"text,omitempty"`
+	Entities                []MessageEntity `json:"entities,omitempty"`
+	IsPrivate               bool            `json:"is_private,omitempty"`
+	IsSaved                 bool            `json:"is_saved,omitempty"`
+	CanBeUpgraded           bool            `json:"can_be_upgraded,omitempty"`
+	CanBeTransferred        bool            `json:"can_be_transferred,omitempty"`
+	WasRefunded             bool            `json:"was_refunded,omitempty"`
+	ConvertStarCount        int64           `json:"convert_star_count,omitempty"`
+	PrepaidUpgradeStarCount int64           `json:"prepaid_upgrade_star_count,omitempty"`
+	TransferStarCount       int64           `json:"transfer_star_count,omitempty"`
+	NextTransferDate        int             `json:"next_transfer_date,omitempty"`
+	IsUpgradeSeparate       bool            `json:"is_upgrade_separate,omitempty"`
+	UniqueGiftNumber        int             `json:"unique_gift_number,omitempty"`
 }
 
 // UserGifts represents a list of gifts received by a user or chat.
 type UserGifts struct {
 	TotalCount int         `json:"total_count"`
 	Gifts      []OwnedGift `json:"gifts"`
+	NextOffset string      `json:"next_offset,omitempty"`
 }
 
 // Story represents a story.
@@ -1050,18 +1135,18 @@ type Story struct {
 }
 
 type AnswerChatJoinRequestQueryRequest struct {
-	ChatJoinRequestQueryID string `json:"chat_join_request_query_id"`
-	Result                 string `json:"result"`
+	ChatJoinRequestQueryID json.Number `json:"chat_join_request_query_id"`
+	Result                 string      `json:"result"`
 }
 
 type SendChatJoinRequestWebAppRequest struct {
-	ChatJoinRequestQueryID string `json:"chat_join_request_query_id"`
-	WebAppURL              string `json:"web_app_url"`
+	ChatJoinRequestQueryID json.Number `json:"chat_join_request_query_id"`
+	WebAppURL              string      `json:"web_app_url"`
 }
 
 type AnswerCustomQueryRequest struct {
-	CustomQueryID string `json:"custom_query_id"`
-	Data          string `json:"data"`
+	CustomQueryID json.Number `json:"custom_query_id"`
+	Data          string      `json:"data"`
 }
 
 type SendCustomRequestRequest struct {
@@ -1070,7 +1155,7 @@ type SendCustomRequestRequest struct {
 }
 
 type AnswerGuestQueryRequest struct {
-	GuestQueryID string          `json:"guest_query_id"`
+	GuestQueryID json.Number     `json:"guest_query_id"`
 	Result       json.RawMessage `json:"result"`
 }
 
@@ -1112,6 +1197,7 @@ type GetChatGiftsRequest struct {
 	ExcludeUnlimited            bool   `json:"exclude_unlimited,omitempty"`
 	ExcludeLimitedUpgradable    bool   `json:"exclude_limited_upgradable,omitempty"`
 	ExcludeLimitedNonUpgradable bool   `json:"exclude_limited_non_upgradable,omitempty"`
+	ExcludeFromBlockchain       bool   `json:"exclude_from_blockchain,omitempty"`
 	ExcludeUnique               bool   `json:"exclude_unique,omitempty"`
 	SortByPrice                 bool   `json:"sort_by_price,omitempty"`
 	Offset                      string `json:"offset,omitempty"`
@@ -1123,6 +1209,7 @@ type GetUserGiftsRequest struct {
 	ExcludeUnlimited            bool   `json:"exclude_unlimited,omitempty"`
 	ExcludeLimitedUpgradable    bool   `json:"exclude_limited_upgradable,omitempty"`
 	ExcludeLimitedNonUpgradable bool   `json:"exclude_limited_non_upgradable,omitempty"`
+	ExcludeFromBlockchain       bool   `json:"exclude_from_blockchain,omitempty"`
 	ExcludeUnique               bool   `json:"exclude_unique,omitempty"`
 	SortByPrice                 bool   `json:"sort_by_price,omitempty"`
 	Offset                      string `json:"offset,omitempty"`
@@ -1136,6 +1223,8 @@ type GetBusinessAccountGiftsRequest struct {
 	ExcludeUnlimited            bool   `json:"exclude_unlimited,omitempty"`
 	ExcludeLimitedUpgradable    bool   `json:"exclude_limited_upgradable,omitempty"`
 	ExcludeLimitedNonUpgradable bool   `json:"exclude_limited_non_upgradable,omitempty"`
+	ExcludeFromBlockchain       bool   `json:"exclude_from_blockchain,omitempty"`
+	ExcludeLimited              bool   `json:"exclude_limited,omitempty"`
 	ExcludeUnique               bool   `json:"exclude_unique,omitempty"`
 	SortByPrice                 bool   `json:"sort_by_price,omitempty"`
 	Offset                      string `json:"offset,omitempty"`
@@ -1207,11 +1296,12 @@ type GetUserPersonalChatMessagesRequest struct {
 }
 
 type GiftPremiumSubscriptionRequest struct {
-	UserID        int64  `json:"user_id"`
-	MonthCount    int    `json:"month_count"`
-	StarCount     int64  `json:"star_count,omitempty"`
-	Text          string `json:"text,omitempty"`
-	TextParseMode string `json:"text_parse_mode,omitempty"`
+	UserID        int64           `json:"user_id"`
+	MonthCount    int             `json:"month_count"`
+	StarCount     int64           `json:"star_count,omitempty"`
+	Text          string          `json:"text,omitempty"`
+	TextParseMode string          `json:"text_parse_mode,omitempty"`
+	TextEntities  []MessageEntity `json:"text_entities,omitempty"`
 }
 
 type EditUserStarSubscriptionRequest struct {
@@ -1286,18 +1376,67 @@ type SendRichMessageDraftRequest struct {
 }
 
 type SendRichMessageRequest struct {
-	BusinessConnectionID string          `json:"business_connection_id,omitempty"`
-	ChatID               int64           `json:"chat_id"`
-	MessageThreadID      int             `json:"message_thread_id,omitempty"`
-	RichMessage          json.RawMessage `json:"rich_message"`
+	BusinessConnectionID string           `json:"business_connection_id,omitempty"`
+	ChatID               int64            `json:"chat_id"`
+	MessageThreadID      int              `json:"message_thread_id,omitempty"`
+	RichMessage          json.RawMessage  `json:"rich_message"`
+	DisableNotification  bool             `json:"disable_notification,omitempty"`
+	ProtectContent       bool             `json:"protect_content,omitempty"`
+	MessageEffectID      string           `json:"message_effect_id,omitempty"`
+	ReplyParameters      *ReplyParameters `json:"reply_parameters,omitempty"`
+	ReplyMarkup          json.RawMessage  `json:"reply_markup,omitempty"`
+
+	Files     map[string][]byte `json:"-"`
+	FileNames map[string]string `json:"-"`
 }
 
 type SendChecklistRequest struct {
-	BusinessConnectionID string          `json:"business_connection_id,omitempty"`
-	ChatID               int64           `json:"chat_id"`
-	MessageThreadID      int             `json:"message_thread_id,omitempty"`
-	Checklist            json.RawMessage `json:"checklist"`
-	ReplyMarkup          json.RawMessage `json:"reply_markup,omitempty"`
+	BusinessConnectionID string           `json:"business_connection_id,omitempty"`
+	ChatID               int64            `json:"chat_id"`
+	MessageThreadID      int              `json:"message_thread_id,omitempty"`
+	Checklist            json.RawMessage  `json:"checklist"`
+	DisableNotification  bool             `json:"disable_notification,omitempty"`
+	ProtectContent       bool             `json:"protect_content,omitempty"`
+	MessageEffectID      string           `json:"message_effect_id,omitempty"`
+	ReplyParameters      *ReplyParameters `json:"reply_parameters,omitempty"`
+	ReplyMarkup          json.RawMessage  `json:"reply_markup,omitempty"`
+}
+
+// Checklist describes a checklist message.
+type Checklist struct {
+	Title                    string          `json:"title"`
+	TitleEntities            []MessageEntity `json:"title_entities,omitempty"`
+	Tasks                    []ChecklistTask `json:"tasks"`
+	OthersCanAddTasks        bool            `json:"others_can_add_tasks,omitempty"`
+	OthersCanMarkTasksAsDone bool            `json:"others_can_mark_tasks_as_done,omitempty"`
+}
+
+// ChecklistTask describes a task in a checklist.
+type ChecklistTask struct {
+	ID              int             `json:"id"`
+	Text            string          `json:"text"`
+	TextEntities    []MessageEntity `json:"text_entities,omitempty"`
+	CompletedByUser *User           `json:"completed_by_user,omitempty"`
+	CompletedByChat *Chat           `json:"completed_by_chat,omitempty"`
+	CompletionDate  int             `json:"completion_date,omitempty"`
+}
+
+// InputChecklist is the checklist to send or edit.
+type InputChecklist struct {
+	Title                    string               `json:"title"`
+	ParseMode                string               `json:"parse_mode,omitempty"`
+	TitleEntities            []MessageEntity      `json:"title_entities,omitempty"`
+	Tasks                    []InputChecklistTask `json:"tasks"`
+	OthersCanAddTasks        bool                 `json:"others_can_add_tasks,omitempty"`
+	OthersCanMarkTasksAsDone bool                 `json:"others_can_mark_tasks_as_done,omitempty"`
+}
+
+// InputChecklistTask is a task of an InputChecklist.
+type InputChecklistTask struct {
+	ID           int             `json:"id"`
+	Text         string          `json:"text"`
+	ParseMode    string          `json:"parse_mode,omitempty"`
+	TextEntities []MessageEntity `json:"text_entities,omitempty"`
 }
 
 type EditMessageChecklistRequest struct {

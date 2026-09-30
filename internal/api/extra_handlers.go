@@ -2102,12 +2102,12 @@ func (s *Server) handleAnswerGuestQuery(ctx *fasthttp.RequestCtx, bot *botmanage
 	}
 	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	ok, err := bot.AnswerGuestQuery(c, &req)
+	res, err := bot.AnswerGuestQuery(c, &req)
 	if err != nil {
 		s.respondError(ctx, 400, "Bad Request: "+err.Error())
 		return
 	}
-	s.respondOK(ctx, ok)
+	s.respondOK(ctx, res)
 }
 
 func (s *Server) handleApproveSuggestedPost(ctx *fasthttp.RequestCtx, bot *botmanager.BotInstance) {
@@ -2562,7 +2562,9 @@ func (s *Server) handleSendRichMessage(ctx *fasthttp.RequestCtx, bot *botmanager
 		s.respondError(ctx, 400, "Bad Request: "+err.Error())
 		return
 	}
-	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	req.Files, req.FileNames = ExtractAllFilesFromRequest(ctx)
+	// Rich messages may upload several media files before sending.
+	c, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	res, err := bot.SendRichMessage(c, &req)
 	if err != nil {
