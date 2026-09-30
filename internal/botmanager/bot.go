@@ -55,6 +55,7 @@ type BotInstance struct {
 	secretToken     string
 	self            *converter.User
 	lastSelfRefresh time.Time
+	selfRefreshing  atomic.Bool
 	// botID is the Telegram user ID of the bot, used as the Redis Stream key.
 	// Set to 0 until authentication completes.
 	botID        int64
@@ -914,15 +915,25 @@ func (b *BotInstance) RefreshMe(ctx context.Context) *converter.User {
 	return b.GetMe()
 }
 
-// GetOrRefreshMe returns bot profile information. If profile is already cached in memory,
-// it returns immediately in microseconds without blocking on MTProto network round-trips.
+// selfProfileTTL bounds how long getMe may serve a cached profile, so BotFather
+// changes such as Secretary Mode (can_connect_to_business) become visible without a restart.
+const selfProfileTTL = time.Minute
+
+// GetOrRefreshMe returns bot profile information. A cached profile is returned as is
+// while it is younger than selfProfileTTL; otherwise it is re-fetched from Telegram,
+// falling back to the cached copy if the refresh fails or is already in progress.
 func (b *BotInstance) GetOrRefreshMe(ctx context.Context) *converter.User {
 	b.mu.RLock()
 	self := b.self
+	fresh := time.Since(b.lastSelfRefresh) < selfProfileTTL
 	b.mu.RUnlock()
 
 	if self != nil {
-		return self
+		if fresh || b.raw == nil || !b.selfRefreshing.CompareAndSwap(false, true) {
+			return self
+		}
+		defer b.selfRefreshing.Store(false)
+		return b.RefreshMe(ctx)
 	}
 
 	if b.raw != nil {
