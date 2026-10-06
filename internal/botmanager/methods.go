@@ -3449,6 +3449,8 @@ func (b *BotInstance) SetBusinessAccountProfilePhoto(ctx context.Context, req *c
 		} else {
 			fileName = "profile-photo.jpg"
 		}
+	} else if req.PhotoType == "static" {
+		fileName = photoFileName(fileName, req.PhotoData)
 	}
 	file, err := uploader.NewUploader(raw).FromBytes(ctx, fileName, req.PhotoData)
 	if err != nil {

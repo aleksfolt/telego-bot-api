@@ -197,6 +197,33 @@ func (b *BotInstance) uploadFromURL(ctx context.Context, rawURL string) (tg.Inpu
 	return inputFile, mediaType, src.name, nil
 }
 
+// photoFileName returns a file name that Telegram accepts for an uploaded photo.
+// Clients often send files without an extension (e.g. a UUID path), which MTProto
+// rejects with PHOTO_EXT_INVALID, while the official Bot API detects the type from the
+// content. The extension is therefore taken from the data when the name has no valid one.
+func photoFileName(name string, data []byte) string {
+	ext := strings.ToLower(path.Ext(name))
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp":
+		return name
+	}
+	switch http.DetectContentType(data) {
+	case "image/png":
+		ext = ".png"
+	case "image/gif":
+		ext = ".gif"
+	case "image/webp":
+		ext = ".webp"
+	default:
+		ext = ".jpg"
+	}
+	base := strings.TrimSuffix(name, path.Ext(name))
+	if base == "" || base == "." || base == "/" {
+		base = "photo"
+	}
+	return base + ext
+}
+
 // isMediaURL returns true if the string looks like an http/https URL.
 func isMediaURL(s string) bool {
 	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")

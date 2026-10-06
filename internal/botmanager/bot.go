@@ -1679,10 +1679,7 @@ func (b *BotInstance) SendPhoto(ctx context.Context, req *converter.SendPhotoReq
 	var media tg.InputMediaClass
 
 	if len(req.PhotoData) > 0 {
-		fileName := req.PhotoFileName
-		if fileName == "" {
-			fileName = "photo.jpg"
-		}
+		fileName := photoFileName(req.PhotoFileName, req.PhotoData)
 		u := uploader.NewUploader(b.raw())
 		inputFile, err := u.FromBytes(ctx, fileName, req.PhotoData)
 		if err != nil {
@@ -1737,7 +1734,7 @@ func (b *BotInstance) SendPhoto(ctx context.Context, req *converter.SendPhotoReq
 			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
 				data, err := os.ReadFile(localPath)
 				if err == nil && len(data) > 0 {
-					fileName := filepath.Base(localPath)
+					fileName := photoFileName(filepath.Base(localPath), data)
 					u := uploader.NewUploader(b.raw())
 					inputFile, err := u.FromBytes(ctx, fileName, data)
 					if err != nil {
@@ -3896,10 +3893,7 @@ func (b *BotInstance) resolveInputSingleMedia(ctx context.Context, peer tg.Input
 	}
 
 	// Photo upload (attach://)
-	if fileName == "" {
-		fileName = "photo.jpg"
-	}
-	inputFile, err := u.FromBytes(ctx, fileName, data)
+	inputFile, err := u.FromBytes(ctx, photoFileName(fileName, data), data)
 	if err != nil {
 		return nil, fmt.Errorf("upload photo bytes: %w", err)
 	}

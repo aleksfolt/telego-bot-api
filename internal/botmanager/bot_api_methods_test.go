@@ -364,3 +364,19 @@ func TestManagedBotAccessSettings(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 }
+
+func TestPhotoFileNameAddsExtensionFromContent(t *testing.T) {
+	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+	jpeg := []byte("\xff\xd8\xff\xe0\x00\x10JFIF")
+	gif := []byte("GIF89a\x01\x00\x01\x00")
+
+	require.Equal(t, "4498e8c8-63dc.png", photoFileName("4498e8c8-63dc", png))
+	require.Equal(t, "4498e8c8-63dc.jpg", photoFileName("4498e8c8-63dc", jpeg))
+	require.Equal(t, "a.gif", photoFileName("a", gif))
+	require.Equal(t, "photo.jpg", photoFileName("", jpeg))
+	// A wrong extension is replaced, a valid one is kept as is.
+	require.Equal(t, "post.png", photoFileName("post.dat", png))
+	require.Equal(t, "Cat.JPG", photoFileName("Cat.JPG", jpeg))
+	// Unknown content falls back to .jpg.
+	require.Equal(t, "x.jpg", photoFileName("x", []byte("not an image")))
+}
