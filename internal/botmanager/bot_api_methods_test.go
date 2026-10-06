@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/gotd/td/bin"
 	"github.com/gotd/td/tg"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 	"telego-bot-api/internal/converter"
+	"telego-bot-api/internal/storage"
 )
 
 func TestAnswerChatJoinRequestQueryAcceptsStringAndNumberIDs(t *testing.T) {
@@ -379,4 +382,22 @@ func TestPhotoFileNameAddsExtensionFromContent(t *testing.T) {
 	require.Equal(t, "Cat.JPG", photoFileName("Cat.JPG", jpeg))
 	// Unknown content falls back to .jpg.
 	require.Equal(t, "x.jpg", photoFileName("x", []byte("not an image")))
+}
+
+func TestHandleDoesNotBlockOnRedis(t *testing.T) {
+	b := mediaTestBot(nil)
+	b.botID = 42
+	b.logger = zap.NewNop()
+	// Nothing listens on port 1: every Redis call fails and the worker keeps retrying.
+	b.redisStore = storage.NewRedisStore("127.0.0.1:1", "", 0)
+	t.Cleanup(b.stopUpdateWorker)
+
+	start := time.Now()
+	for i := 0; i < 10; i++ {
+		require.NoError(t, b.Handle(context.Background(), &tg.UpdateShort{
+			Update: &tg.UpdateNewMessage{Message: &tg.Message{ID: i, PeerID: &tg.PeerUser{UserID: 123}}},
+		}))
+	}
+	// Handle runs on the MTProto read loop and must only enqueue.
+	require.Less(t, time.Since(start), 500*time.Millisecond)
 }

@@ -57,6 +57,16 @@ type BotInstance struct {
 	self            *converter.User
 	lastSelfRefresh time.Time
 	selfRefreshing  atomic.Bool
+
+	// Update pipeline: Handle enqueues MTProto batches, one worker persists them in order.
+	updatesOnce     sync.Once
+	updatesStopOnce sync.Once
+	updatesCh       chan tg.UpdatesClass
+	updatesQuit     chan struct{}
+
+	// savedPeers remembers access hashes already written to Redis.
+	savedPeersMu sync.Mutex
+	savedPeers   map[int64]int64
 	// botID is the Telegram user ID of the bot, used as the Redis Stream key.
 	// Set to 0 until authentication completes.
 	botID        int64
@@ -424,10 +434,9 @@ func IsTokenRevoked(err error) bool {
 	return tgerr.Is(err, "ACCESS_TOKEN_INVALID", "ACCESS_TOKEN_EXPIRED", "USER_DEACTIVATED", "USER_DEACTIVATED_BAN")
 }
 
-// Handle handles incoming MTProto updates from Telegram.
-func (b *BotInstance) Handle(ctx context.Context, u tg.UpdatesClass) error {
-	b.touch()
-
+// processUpdates converts a batch of MTProto updates and persists them to the bot's
+// Redis Stream. It runs on the per-bot update worker, never on the MTProto read loop.
+func (b *BotInstance) processUpdates(u tg.UpdatesClass) {
 	b.mu.RLock()
 	url := b.webhookURL
 	botID := b.botID
@@ -453,23 +462,23 @@ func (b *BotInstance) Handle(ctx context.Context, u tg.UpdatesClass) error {
 	case *tg.UpdateShortMessage:
 		if botID == 0 {
 			b.logger.Warn("Skipping update: botID not yet set")
-			return nil
+			return
 		}
-		uid, err := b.redisStore.NextUpdateID(ctx, botID)
+		uid, err := b.nextUpdateID(botID)
 		if err != nil {
-			b.logger.Warn("Failed to get next update_id", zap.Error(err))
-			return nil
+			b.logger.Error("Update lost: failed to allocate update_id", zap.Error(err))
+			return
 		}
 		extraUpdates = append(extraUpdates, b.converter.ConvertShortMessage(uid, upds))
 	case *tg.UpdateShortChatMessage:
 		if botID == 0 {
 			b.logger.Warn("Skipping update: botID not yet set")
-			return nil
+			return
 		}
-		uid, err := b.redisStore.NextUpdateID(ctx, botID)
+		uid, err := b.nextUpdateID(botID)
 		if err != nil {
-			b.logger.Warn("Failed to get next update_id", zap.Error(err))
-			return nil
+			b.logger.Error("Update lost: failed to allocate update_id", zap.Error(err))
+			return
 		}
 		extraUpdates = append(extraUpdates, b.converter.ConvertShortChatMessage(uid, upds))
 	default:
@@ -478,13 +487,14 @@ func (b *BotInstance) Handle(ctx context.Context, u tg.UpdatesClass) error {
 
 	if botID == 0 {
 		b.logger.Warn("Skipping updates: botID not yet set")
-		return nil
+		return
 	}
 
 	for _, rawUpd := range updatesList {
-		uid, err := b.redisStore.NextUpdateID(ctx, botID)
+		uid, err := b.nextUpdateID(botID)
 		if err != nil {
-			b.logger.Warn("Failed to get next update_id", zap.Error(err))
+			b.logger.Error("Update lost: failed to allocate update_id",
+				zap.String("type", fmt.Sprintf("%T", rawUpd)), zap.Error(err))
 			continue
 		}
 		converted, err := b.converter.ConvertUpdate(uid, rawUpd, entities)
@@ -505,7 +515,7 @@ func (b *BotInstance) Handle(ctx context.Context, u tg.UpdatesClass) error {
 	}
 
 	if len(extraUpdates) == 0 {
-		return nil
+		return
 	}
 
 	// Persist each update to Redis Stream and optionally enqueue webhook delivery.
@@ -516,11 +526,10 @@ func (b *BotInstance) Handle(ctx context.Context, u tg.UpdatesClass) error {
 			continue
 		}
 
-		appendCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		appendErr := b.redisStore.AppendUpdate(appendCtx, botID, upd.UpdateID, payload)
-		cancel()
-		if appendErr != nil {
-			b.logger.Error("Failed to append update to Redis Stream", zap.Error(appendErr), zap.Int("update_id", upd.UpdateID))
+		if appendErr := b.appendUpdate(botID, upd.UpdateID, payload); appendErr != nil {
+			b.logger.Error("Update lost: failed to append update to Redis Stream", zap.Error(appendErr),
+				zap.Int("update_id", upd.UpdateID), zap.String("type", updateKind(upd)))
+			continue
 		}
 
 		kind := updateKind(upd)
@@ -551,8 +560,6 @@ func (b *BotInstance) Handle(ctx context.Context, u tg.UpdatesClass) error {
 	case b.updateNotify <- struct{}{}:
 	default:
 	}
-
-	return nil
 }
 
 // GetUpdates retrieves buffered updates from Redis Streams for long-polling.
@@ -717,25 +724,51 @@ func updateAllowed(update *converter.Update, allowed []string) bool {
 	return false
 }
 
+// savePeersToRedis persists access hashes of new or changed peers with a single HSET.
+// Peers already saved with the same hash are skipped, so busy groups do not issue a
+// Redis write per member on every update.
 func (b *BotInstance) savePeersToRedis(users []tg.UserClass, chats []tg.ChatClass) {
 	if b.redisStore == nil {
 		return
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		for _, u := range users {
-			if user, ok := u.(*tg.User); ok && user.AccessHash != 0 {
-				_ = b.redisStore.SavePeer(ctx, b.token, user.ID, user.AccessHash, "user")
-			}
+	fields := make(map[string]string)
+	saved := make(map[int64]int64)
+	b.savedPeersMu.Lock()
+	if b.savedPeers == nil {
+		b.savedPeers = make(map[int64]int64)
+	}
+	add := func(id, hash int64, peerType string) {
+		if hash == 0 || b.savedPeers[id] == hash {
+			return
 		}
-		for _, c := range chats {
-			if channel, ok := c.(*tg.Channel); ok && channel.AccessHash != 0 {
-				_ = b.redisStore.SavePeer(ctx, b.token, -1000000000000-channel.ID, channel.AccessHash, "channel")
-			}
+		fields[strconv.FormatInt(id, 10)] = fmt.Sprintf("%d:%s", hash, peerType)
+		saved[id] = hash
+	}
+	for _, u := range users {
+		if user, ok := u.(*tg.User); ok {
+			add(user.ID, user.AccessHash, "user")
 		}
-	}()
+	}
+	for _, c := range chats {
+		if channel, ok := c.(*tg.Channel); ok {
+			add(-1000000000000-channel.ID, channel.AccessHash, "channel")
+		}
+	}
+	b.savedPeersMu.Unlock()
+	if len(fields) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := b.redisStore.SavePeers(ctx, b.token, fields); err != nil {
+		b.logger.Warn("Failed to save peers to Redis", zap.Int("count", len(fields)), zap.Error(err))
+		return
+	}
+	b.savedPeersMu.Lock()
+	for id, hash := range saved {
+		b.savedPeers[id] = hash
+	}
+	b.savedPeersMu.Unlock()
 }
 
 // DropPendingUpdates removes all pending updates for this bot from Redis Streams.
@@ -878,6 +911,10 @@ func (b *BotInstance) Hibernate() {
 
 	b.peers.Reset()
 
+	b.savedPeersMu.Lock()
+	b.savedPeers = nil
+	b.savedPeersMu.Unlock()
+
 	b.logger.Info("Bot entered hibernation mode; RAM caches evicted", zap.Int64("bot_id", b.BotID()))
 }
 
@@ -1010,27 +1047,8 @@ func (b *BotInstance) resolvePeer(chatID int64) (tg.InputPeerClass, error) {
 		}
 	}
 
-	// Try fetching dialogs via MTProto to discover any channels/chats the bot belongs to
-	if b.raw() != nil {
-		dCtx, dCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer dCancel()
-		if res, dErr := b.raw().MessagesGetDialogs(dCtx, &tg.MessagesGetDialogsRequest{
-			OffsetPeer: &tg.InputPeerEmpty{},
-			Limit:      100,
-		}); dErr == nil {
-			switch d := res.(type) {
-			case *tg.MessagesDialogs:
-				b.savePeersToRedis(d.Users, d.Chats)
-				b.peers.IngestPeers(d.Users, d.Chats)
-			case *tg.MessagesDialogsSlice:
-				b.savePeersToRedis(d.Users, d.Chats)
-				b.peers.IngestPeers(d.Users, d.Chats)
-			}
-			if p, pErr := b.peers.ResolvePeer(chatID); pErr == nil {
-				return p, nil
-			}
-		}
-	}
+	// Bots cannot call messages.getDialogs (BOT_METHOD_INVALID), so there is nothing
+	// more to discover over MTProto; trying it only added a failing round trip per call.
 	if chatID > 0 {
 		// Telegram accepts a zero access hash for users that already contacted the bot.
 		return &tg.InputPeerUser{UserID: chatID}, nil
@@ -2677,6 +2695,7 @@ func (b *BotInstance) Stop() {
 	if b.cancel != nil {
 		b.cancel()
 	}
+	b.stopUpdateWorker()
 }
 
 func updateKind(upd *converter.Update) string {

@@ -38,6 +38,11 @@ type Task struct {
 	OnError     func(botID int64, err error)
 }
 
+// webhookTimeout bounds one webhook request. A response slower than this is retried
+// later by the delivery loop, so it must be generous: a short timeout makes a busy
+// application receive the same update several times.
+const webhookTimeout = 30 * time.Second
+
 // NewDispatcher creates a webhook dispatcher with a dedicated worker pool.
 func NewDispatcher(workers int, queueSize int, logger *zap.Logger) *Dispatcher {
 	d := &Dispatcher{
@@ -47,8 +52,8 @@ func NewDispatcher(workers int, queueSize int, logger *zap.Logger) *Dispatcher {
 			// Keeping MaxIdleConnDuration at 4s ensures fasthttp cleans up
 			// before Node.js sends FIN, preventing stale connection resets.
 			MaxIdleConnDuration:           4 * time.Second,
-			ReadTimeout:                   5 * time.Second,
-			WriteTimeout:                  5 * time.Second,
+			ReadTimeout:                   webhookTimeout,
+			WriteTimeout:                  webhookTimeout,
 			NoDefaultUserAgentHeader:      true,
 			DisableHeaderNamesNormalizing: true,
 		},
@@ -168,7 +173,7 @@ func (d *Dispatcher) sendWebhook(req *fasthttp.Request, resp *fasthttp.Response,
 		}
 		req.SetBody(body)
 
-		err := d.client.DoTimeout(req, resp, 5*time.Second)
+		err := d.client.DoTimeout(req, resp, webhookTimeout)
 		if err == nil {
 			statusCode := resp.StatusCode()
 			if statusCode >= 200 && statusCode < 300 {
@@ -180,25 +185,32 @@ func (d *Dispatcher) sendWebhook(req *fasthttp.Request, resp *fasthttp.Response,
 				)
 				return nil
 			}
+			// The application received the update; the delivery loop retries it with backoff.
 			lastErr = fmt.Errorf("unexpected status code: %d", statusCode)
-			// Don't retry client 4xx errors
-			if statusCode >= 400 && statusCode < 500 {
-				break
-			}
-		} else {
-			lastErr = err
+			break
 		}
-
-		// If the connection was closed prematurely, retry with short backoff
-		if errors.Is(err, fasthttp.ErrConnectionClosed) || (err != nil && strings.Contains(err.Error(), "closed connection")) {
-			time.Sleep(50 * time.Millisecond)
-			continue
+		lastErr = err
+		// Retry immediately only when the request surely did not reach the application
+		// (stale keep-alive connection, connection refused). After a timeout the
+		// application may still be processing it, so an immediate resend would duplicate it.
+		if !isNotDeliveredError(err) {
+			break
 		}
-
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(time.Duration(50*(attempt+1)) * time.Millisecond)
 	}
 
 	return fmt.Errorf("do request: %w", lastErr)
+}
+
+// isNotDeliveredError reports whether a request failed before the application could
+// have received it.
+func isNotDeliveredError(err error) bool {
+	if errors.Is(err, fasthttp.ErrConnectionClosed) || errors.Is(err, fasthttp.ErrNoFreeConns) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "closed connection") || strings.Contains(msg, "error when dialing") ||
+		strings.Contains(msg, "connection refused")
 }
 
 // Stop gracefully stops the dispatcher worker pool, draining remaining queued tasks.

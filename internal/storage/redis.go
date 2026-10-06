@@ -190,6 +190,14 @@ func (r *RedisStore) SavePeer(ctx context.Context, token string, chatID, accessH
 	return r.client.HSet(ctx, fmt.Sprintf("telego:peers:%s", token), strconv.FormatInt(chatID, 10), val).Err()
 }
 
+// SavePeers stores several peers at once; values use the SavePeer "<access_hash>:<type>" format.
+func (r *RedisStore) SavePeers(ctx context.Context, token string, peers map[string]string) error {
+	if len(peers) == 0 {
+		return nil
+	}
+	return r.client.HSet(ctx, fmt.Sprintf("telego:peers:%s", token), peers).Err()
+}
+
 // GetPeer retrieves access_hash and peer_type for a chat_id.
 func (r *RedisStore) GetPeer(ctx context.Context, token string, chatID int64) (int64, string, bool, error) {
 	val, err := r.client.HGet(ctx, fmt.Sprintf("telego:peers:%s", token), strconv.FormatInt(chatID, 10)).Result()
@@ -435,26 +443,39 @@ func (r *RedisStore) AckUpdates(ctx context.Context, botID int64, offset int) er
 		return nil
 	}
 	streamKey := updateStreamKey(botID)
-	// Read all messages (bounded by streamMaxLen which caps the stream)
-	msgs, err := r.client.XRange(ctx, streamKey, "-", "+").Result()
-	if err != nil {
-		if errors.Is(err, redis.Nil) {
-			return nil
+	// update_ids grow in stream order (one writer per bot), so only the head of the
+	// stream can be acknowledged: page from the start and stop at the first entry that
+	// is not, instead of reading the whole stream (up to streamMaxLen) on every poll.
+	cursor := "-"
+	for {
+		msgs, err := r.client.XRangeN(ctx, streamKey, cursor, "+", 100).Result()
+		if err != nil {
+			if errors.Is(err, redis.Nil) {
+				return nil
+			}
+			return fmt.Errorf("xrange for ack: %w", err)
 		}
-		return fmt.Errorf("xrange for ack: %w", err)
-	}
-	var toDelete []string
-	for _, msg := range msgs {
-		uidStr, _ := msg.Values["uid"].(string)
-		uid, _ := strconv.Atoi(uidStr)
-		if uid < offset {
+		var toDelete []string
+		done := len(msgs) < 100
+		for _, msg := range msgs {
+			uidStr, _ := msg.Values["uid"].(string)
+			uid, _ := strconv.Atoi(uidStr)
+			if uid >= offset {
+				done = true
+				break
+			}
 			toDelete = append(toDelete, msg.ID)
 		}
+		if len(toDelete) != 0 {
+			if err := r.client.XDel(ctx, streamKey, toDelete...).Err(); err != nil {
+				return fmt.Errorf("xdel for ack: %w", err)
+			}
+			cursor = "(" + toDelete[len(toDelete)-1]
+		}
+		if done || len(toDelete) == 0 {
+			return nil
+		}
 	}
-	if len(toDelete) == 0 {
-		return nil
-	}
-	return r.client.XDel(ctx, streamKey, toDelete...).Err()
 }
 
 // AckUpdate removes exactly one delivered stream entry. Webhook delivery may

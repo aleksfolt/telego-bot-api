@@ -17,6 +17,11 @@ import (
 var floodRegex = regexp.MustCompile(`(?:FLOOD_(?:PREMIUM_)?WAIT_|SLOWMODE_WAIT_)(\d+)`)
 var migrateRegex = regexp.MustCompile(`MIGRATE_TO_(\d+)`)
 
+// unauthorizedRegex matches only RPC errors meaning the bot itself is not authorized.
+// It must not match longer codes that merely contain these words, such as
+// PAYMENT_PROVIDER_TOKEN_INVALID, because a 401 makes the server reset the session.
+var unauthorizedRegex = regexp.MustCompile(`(?:^|[^A-Z_])(?:ACCESS_TOKEN_INVALID|ACCESS_TOKEN_EXPIRED|BOT_TOKEN_INVALID|EXPIRED_BOT_TOKEN|SESSION_REVOKED|AUTH_KEY_UNREGISTERED)(?:$|[^A-Z_])`)
+
 // MapRpcError converts an internal MTProto / gotd error into standard Telegram Bot API
 // HTTP status code, description, and optional ResponseParameters.
 func MapRpcError(err error) (int, string, *converter.ResponseParameters) {
@@ -46,6 +51,10 @@ func MapRpcError(err error) (int, string, *converter.ResponseParameters) {
 		// it must not turn a failed business connection into an invalid bot token.
 		if rpcErr.Message == "AUTH_KEY_UNREGISTERED" && strings.Contains(strings.ToLower(err.Error()), "business") {
 			return 400, "Bad Request: BUSINESS_CONNECTION_INVALID", nil
+		}
+		// Telegram's own 401 class means the bot itself is not authorized.
+		if rpcErr.Code == 401 && !strings.Contains(strings.ToLower(err.Error()), "business") {
+			return 401, "Unauthorized: bot token is invalid or revoked", nil
 		}
 		return MapErrorString(rpcErr.Message)
 	}
@@ -81,11 +90,7 @@ func MapErrorString(desc string) (int, string, *converter.ResponseParameters) {
 	}
 
 	// 3. Unauthorized errors (401)
-	if strings.Contains(desc, "TOKEN_INVALID") ||
-		strings.Contains(desc, "EXPIRED_BOT_TOKEN") ||
-		strings.Contains(desc, "BOT_TOKEN_INVALID") ||
-		strings.Contains(desc, "SESSION_REVOKED") ||
-		(strings.Contains(desc, "AUTH_KEY_UNREGISTERED") && !strings.Contains(strings.ToLower(desc), "business")) {
+	if unauthorizedRegex.MatchString(desc) && !strings.Contains(strings.ToLower(desc), "business") {
 		return 401, "Unauthorized: bot token is invalid or revoked", nil
 	}
 

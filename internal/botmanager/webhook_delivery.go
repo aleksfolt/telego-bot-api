@@ -12,6 +12,10 @@ import (
 
 const webhookInFlightLimit = 40
 
+// webhookScanPages bounds how many stream pages (100 entries each) one delivery pass
+// reads, so a bot with thousands of failing updates does not re-read the whole stream.
+const webhookScanPages = 20
+
 func (b *BotInstance) restoreWebhookConfig(ctx context.Context) {
 	// Restore webhook configuration from Redis if present
 	if wh, err := b.redisStore.GetWebhook(ctx, b.token); err == nil && wh != nil {
@@ -124,7 +128,7 @@ func (b *BotInstance) deliverPendingWebhooks(ctx context.Context, botID int64, u
 		// Scan beyond failed entries so one unavailable event cannot hide later work.
 		cursor := "0-0"
 		seen := make(map[string]bool)
-		for inFlight < webhookInFlightLimit && ctx.Err() == nil {
+		for pages := 0; inFlight < webhookInFlightLimit && ctx.Err() == nil && pages < webhookScanPages; pages++ {
 			readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 			entries, err := b.redisStore.ReadUpdatesAfter(readCtx, botID, cursor, 100, 0)
 			cancel()
@@ -185,11 +189,20 @@ func (b *BotInstance) deliverPendingWebhooks(ctx context.Context, botID int64, u
 				}
 			}
 		}
-		// New persisted updates and completions wake the loop immediately. The
-		// timer also recovers from missed notifications and retries Redis failures.
-		delay := time.Second
-		if len(attempts) == 0 {
-			delay = 30 * time.Second
+		// New persisted updates and completions wake the loop immediately. Otherwise
+		// sleep until the earliest scheduled retry instead of rescanning every second;
+		// the timer also recovers from missed notifications and Redis failures.
+		delay := 30 * time.Second
+		now := time.Now()
+		for _, a := range attempts {
+			if !a.inFlight {
+				if wait := a.retryAt.Sub(now); wait < delay {
+					delay = wait
+				}
+			}
+		}
+		if delay < time.Second {
+			delay = time.Second
 		}
 		timer := time.NewTimer(delay)
 		select {

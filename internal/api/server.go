@@ -234,7 +234,7 @@ func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 	bot, err := s.botManager.GetOrCreate(context.Background(), token)
 	if err != nil {
 		s.logger.Error("Failed to resolve bot session", zap.Error(err))
-		s.respondError(ctx, 401, "Unauthorized: "+err.Error())
+		s.respondBotStartError(ctx, err)
 		return
 	}
 
@@ -1544,7 +1544,7 @@ func (s *Server) handleDownloadFile(ctx *fasthttp.RequestCtx) {
 
 	bot, err := s.botManager.GetOrCreate(context.Background(), token)
 	if err != nil {
-		s.respondError(ctx, 401, "Unauthorized: "+err.Error())
+		s.respondBotStartError(ctx, err)
 		return
 	}
 
@@ -1791,12 +1791,20 @@ func (s *Server) respondError(ctx *fasthttp.RequestCtx, code int, desc string) {
 			s.respondErrorWithParams(ctx, mappedCode, mappedDesc, params)
 			return
 		}
-	} else if code == 401 {
-		if t, ok := ctx.UserValue("bot_token").(string); ok && t != "" {
-			s.botManager.ResetBot(t)
-		}
 	}
 	s.respondErrorWithParams(ctx, code, desc, nil)
+}
+
+// respondBotStartError reports a failure to start a bot session. Only a malformed or
+// revoked token is Unauthorized; anything else (DC timeout, Redis failure) is transient
+// and must not be reported as 401, which clients treat as an invalid token, nor purge
+// the bot's MTProto session.
+func (s *Server) respondBotStartError(ctx *fasthttp.RequestCtx, err error) {
+	if errors.Is(err, botmanager.ErrInvalidTokenFormat) || botmanager.IsTokenRevoked(err) {
+		s.respondErrorWithParams(ctx, 401, "Unauthorized", nil)
+		return
+	}
+	s.respondErrorWithParams(ctx, 502, "Bad Gateway: bot session is not available: "+err.Error(), nil)
 }
 
 func (s *Server) respondErrorWithParams(ctx *fasthttp.RequestCtx, code int, desc string, params *converter.ResponseParameters) {

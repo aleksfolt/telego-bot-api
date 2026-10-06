@@ -138,3 +138,24 @@ func TestMapRpcError_StandardErrors(t *testing.T) {
 		require.Equal(t, tc.expectedDesc, desc)
 	}
 }
+
+func TestMapErrorStringUnauthorizedOnlyForBotAuthErrors(t *testing.T) {
+	for _, desc := range []string{
+		"rpc error code 401: AUTH_KEY_UNREGISTERED",
+		"ACCESS_TOKEN_INVALID",
+		"rpc error code 400: ACCESS_TOKEN_EXPIRED",
+		"SESSION_REVOKED",
+	} {
+		code, _, _ := MapErrorString(desc)
+		require.Equal(t, 401, code, desc)
+	}
+	// A 401 resets the bot session, so unrelated codes must not match.
+	for _, desc := range []string{
+		"rpc error code 400: PAYMENT_PROVIDER_TOKEN_INVALID",
+		"rpc error code 400: EMAIL_TOKEN_INVALID",
+		"business connection invalid: AUTH_KEY_UNREGISTERED",
+	} {
+		code, _, _ := MapErrorString(desc)
+		require.NotEqual(t, 401, code, desc)
+	}
+}

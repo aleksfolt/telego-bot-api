@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sync/atomic"
 	"testing"
@@ -110,4 +111,38 @@ func TestDispatcherCancelledTaskIsNotSent(t *testing.T) {
 		Context: ctx, URL: "http://127.0.0.1/unused", Update: &converter.Update{UpdateID: 1},
 		OnSuccess: func(int64, int) { t.Fatal("cancelled update must remain pending") },
 	})
+}
+
+func TestDispatcherDoesNotResendAfterApplicationError(t *testing.T) {
+	var calls atomic.Int32
+	server := &fasthttp.Server{Handler: func(ctx *fasthttp.RequestCtx) {
+		calls.Add(1)
+		ctx.SetStatusCode(500)
+	}}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skip("skipping local listener test:", err)
+	}
+	defer ln.Close()
+	go server.Serve(ln) //nolint:errcheck
+
+	d := NewDispatcher(1, 1, zap.NewNop())
+	defer d.Stop()
+	failed := make(chan error, 1)
+	d.EnqueueTask(&Task{URL: "http://" + ln.Addr().String() + "/hook", Update: &converter.Update{UpdateID: 1},
+		OnError: func(_ int64, err error) { failed <- err }})
+	select {
+	case err := <-failed:
+		require.ErrorContains(t, err, "unexpected status code: 500")
+	case <-time.After(5 * time.Second):
+		t.Fatal("delivery did not finish")
+	}
+	// The application already received the update; resending it immediately would duplicate it.
+	require.Equal(t, int32(1), calls.Load())
+}
+
+func TestIsNotDeliveredError(t *testing.T) {
+	require.True(t, isNotDeliveredError(fasthttp.ErrConnectionClosed))
+	require.True(t, isNotDeliveredError(errors.New("error when dialing 127.0.0.1:9003: dial tcp4 127.0.0.1:9003: connect: connection refused")))
+	require.False(t, isNotDeliveredError(fasthttp.ErrTimeout))
 }
