@@ -17,6 +17,7 @@ import (
 	"telego-bot-api/internal/botmanager"
 	"telego-bot-api/internal/config"
 	"telego-bot-api/internal/converter"
+	"telego-bot-api/internal/diag"
 	"telego-bot-api/internal/metrics"
 	"telego-bot-api/internal/webhook"
 
@@ -209,15 +210,23 @@ func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 	token := parts[0]
 	method := strings.ToLower(parts[1])
 	ctx.SetUserValue("bot_token", token)
+	botID, _ := strconv.ParseInt(strings.SplitN(token, ":", 2)[0], 10, 64)
 
 	start := time.Now()
+	// Long polling waits for the client's timeout by design, so it is not watched.
+	stopWatch := func() {}
+	if method != "getupdates" {
+		stopWatch = diag.WatchSlow("api_request", method, zap.Int64("bot_id", botID))
+	}
 	defer func() {
+		stopWatch()
 		status := ctx.Response.StatusCode()
 		latency := time.Since(start)
 		metrics.DefaultRegistry.IncRequests(method, status)
 		metrics.DefaultRegistry.ObserveDuration(method, latency)
 
 		fields := []zap.Field{
+			zap.Int64("bot_id", botID),
 			zap.String("method", method),
 			zap.Int("status", status),
 			zap.Duration("latency", latency),

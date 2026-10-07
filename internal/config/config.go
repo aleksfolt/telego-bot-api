@@ -3,6 +3,7 @@ package config
 import (
 	"flag"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +29,9 @@ type Config struct {
 	// PublicStatus exposes /health, /status and /metrics to public IPs.
 	// By default they answer only loopback and private-network clients.
 	PublicStatus bool
+	// StallDumpDir receives goroutine dumps taken automatically when a request or the
+	// update queue stalls. Empty disables dumps.
+	StallDumpDir string
 }
 
 // Load loads configuration from environment variables and command-line flags.
@@ -36,6 +40,7 @@ func Load() *Config {
 		AppID:            2040,
 		AppHash:          "b18441a1ff607e10a989891a5462e627",
 		HTTPAddr:         "127.0.0.1:8081",
+		StallDumpDir:     filepath.Join(os.TempDir(), "telego-stalls"),
 		OutboundIPs:      nil,
 		RedisAddr:        "127.0.0.1:6379",
 		RedisPassword:    "",
@@ -85,6 +90,9 @@ func Load() *Config {
 	if val := getEnv("TELEGO_PPROF_ADDR", "PPROF_ADDR"); val != "" {
 		cfg.PprofAddr = val
 	}
+	if val, ok := os.LookupEnv("TELEGO_STALL_DUMP_DIR"); ok {
+		cfg.StallDumpDir = val
+	}
 	if val := getEnv("TELEGO_PUBLIC_STATUS", "PUBLIC_STATUS"); val == "true" || val == "1" {
 		cfg.PublicStatus = true
 	}
@@ -125,6 +133,7 @@ func Load() *Config {
 	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "Log level: debug, info, warn, error")
 	flag.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "Log format: console (human-readable colors) or json (production)")
 	flag.BoolVar(&cfg.MTProtoDebug, "mtproto-debug", cfg.MTProtoDebug, "Enable verbose wire-level MTProto transport debug dumps (default: false)")
+	flag.StringVar(&cfg.StallDumpDir, "stall-dump-dir", cfg.StallDumpDir, "Directory for automatic goroutine dumps on stalls (empty disables)")
 	flag.StringVar(&cfg.PprofAddr, "pprof-addr", cfg.PprofAddr, "Optional address for pprof HTTP server (e.g. 127.0.0.1:6060)")
 	flag.BoolVar(&cfg.WarmupAll, "warmup-all", cfg.WarmupAll, "Warm up all registered bots in background (default: false, lazy on-demand like official telegram-bot-api)")
 	flag.BoolVar(&cfg.PublicStatus, "public-status", cfg.PublicStatus, "Serve /health, /status and /metrics to public IPs (default: loopback and private networks only)")

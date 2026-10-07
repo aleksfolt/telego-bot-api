@@ -172,6 +172,8 @@ func (b *BotInstance) rawBusinessInvoker(ctx context.Context, dcID int) (tg.Invo
 			}
 			invoke := businessErrorMiddleware{}.Handle(invoker)
 			invoke = retryMiddleware{logger: b.logger}.Handle(invoke)
+			// Pools of other datacenters bypass the primary client's middlewares.
+			invoke = stallMiddleware{bot: b}.Handle(invoke)
 			lastErr = invoke(callCtx, input, output)
 			if lastErr == nil || !isTransientMTProtoError(lastErr) || callCtx.Err() != nil {
 				return lastErr

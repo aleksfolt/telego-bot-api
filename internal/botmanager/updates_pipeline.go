@@ -2,11 +2,19 @@ package botmanager
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/gotd/td/tg"
 	"go.uber.org/zap"
+	"telego-bot-api/internal/diag"
 )
+
+// queuedUpdates is an MTProto batch waiting for the update worker.
+type queuedUpdates struct {
+	updates  tg.UpdatesClass
+	queuedAt time.Time
+}
 
 // updateQueueSize bounds the MTProto update batches buffered per bot before Handle
 // applies backpressure to the connection.
@@ -21,8 +29,9 @@ const updateQueueSize = 4096
 func (b *BotInstance) Handle(ctx context.Context, u tg.UpdatesClass) error {
 	b.touch()
 	b.startUpdateWorker()
+	item := queuedUpdates{updates: u, queuedAt: time.Now()}
 	select {
-	case b.updatesCh <- u:
+	case b.updatesCh <- item:
 		return nil
 	case <-b.updatesQuit:
 		return nil
@@ -31,7 +40,7 @@ func (b *BotInstance) Handle(ctx context.Context, u tg.UpdatesClass) error {
 	// The worker is behind (e.g. Redis is slow): block rather than drop updates.
 	b.logger.Warn("Update queue is full, delaying MTProto reads", zap.Int("queue_size", updateQueueSize))
 	select {
-	case b.updatesCh <- u:
+	case b.updatesCh <- item:
 	case <-b.updatesQuit:
 	case <-ctx.Done():
 	}
@@ -41,7 +50,7 @@ func (b *BotInstance) Handle(ctx context.Context, u tg.UpdatesClass) error {
 // startUpdateWorker lazily starts the per-bot update worker.
 func (b *BotInstance) startUpdateWorker() {
 	b.updatesOnce.Do(func() {
-		b.updatesCh = make(chan tg.UpdatesClass, updateQueueSize)
+		b.updatesCh = make(chan queuedUpdates, updateQueueSize)
 		b.updatesQuit = make(chan struct{})
 		go b.runUpdateWorker(b.updatesCh, b.updatesQuit)
 	})
@@ -53,7 +62,7 @@ func (b *BotInstance) stopUpdateWorker() {
 	b.updatesStopOnce.Do(func() { close(b.updatesQuit) })
 }
 
-func (b *BotInstance) runUpdateWorker(updates <-chan tg.UpdatesClass, quit <-chan struct{}) {
+func (b *BotInstance) runUpdateWorker(updates <-chan queuedUpdates, quit <-chan struct{}) {
 	defer func() {
 		if r := recover(); r != nil {
 			b.logger.Error("PANIC recovered in update worker", zap.Any("panic", r))
@@ -61,19 +70,33 @@ func (b *BotInstance) runUpdateWorker(updates <-chan tg.UpdatesClass, quit <-cha
 	}()
 	for {
 		select {
-		case u := <-updates:
-			b.processUpdates(u)
+		case item := <-updates:
+			b.processQueued(item, len(updates))
 		case <-quit:
 			for {
 				select {
-				case u := <-updates:
-					b.processUpdates(u)
+				case item := <-updates:
+					b.processQueued(item, len(updates))
 				default:
 					return
 				}
 			}
 		}
 	}
+}
+
+// processQueued persists one queued batch, reporting batches that waited or ran too long.
+func (b *BotInstance) processQueued(item queuedUpdates, backlog int) {
+	if wait := time.Since(item.queuedAt); wait >= diag.SlowThreshold {
+		b.logger.Warn("Update queue stalled", zap.Int64("bot_id", b.BotID()),
+			zap.Duration("waited", wait), zap.Int("backlog", backlog))
+		if wait >= diag.StallThreshold {
+			diag.Dump("update queue", zap.Int64("bot_id", b.BotID()))
+		}
+	}
+	done := diag.Watch("update_processing", fmt.Sprintf("%T", item.updates), zap.Int64("bot_id", b.BotID()))
+	defer done()
+	b.processUpdates(item.updates)
 }
 
 // retryRedis runs op until it succeeds, retrying transient Redis failures with backoff

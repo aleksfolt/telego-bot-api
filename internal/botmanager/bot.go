@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"telego-bot-api/internal/converter"
+	"telego-bot-api/internal/diag"
 	"telego-bot-api/internal/logging"
 	"telego-bot-api/internal/metrics"
 	"telego-bot-api/internal/netpool"
@@ -61,7 +62,7 @@ type BotInstance struct {
 	// Update pipeline: Handle enqueues MTProto batches, one worker persists them in order.
 	updatesOnce     sync.Once
 	updatesStopOnce sync.Once
-	updatesCh       chan tg.UpdatesClass
+	updatesCh       chan queuedUpdates
 	updatesQuit     chan struct{}
 
 	// savedPeers remembers access hashes already written to Redis.
@@ -151,7 +152,7 @@ func NewBotInstance(
 		SessionStorage: redisStore.SessionStorage(token),
 		UpdateHandler:  bot,
 		Logger:         logzap.New(logging.MTProtoLogger(logger, mtprotoDebug)),
-		Middlewares:    []telegram.Middleware{retryMiddleware{logger: logger}, businessErrorMiddleware{}},
+		Middlewares:    []telegram.Middleware{stallMiddleware{bot: bot}, retryMiddleware{logger: logger}, businessErrorMiddleware{}},
 	}
 
 	if dialer != nil {
@@ -218,6 +219,31 @@ func (m retryMiddleware) Handle(next tg.Invoker) telegram.InvokeFunc {
 		}
 		return err
 	}
+}
+
+// stallMiddleware reports MTProto requests that take too long and dumps goroutines
+// when one is stuck, so stalls of busy bots can be diagnosed after the fact.
+type stallMiddleware struct {
+	bot *BotInstance
+}
+
+func (m stallMiddleware) Handle(next tg.Invoker) telegram.InvokeFunc {
+	return func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
+		done := diag.Watch("telegram_request", mtprotoMethod(input), zap.Int64("bot_id", m.bot.BotID()))
+		defer done()
+		return next.Invoke(ctx, input, output)
+	}
+}
+
+// mtprotoMethod returns the TL method name of a request, looking through business wrappers.
+func mtprotoMethod(input bin.Encoder) string {
+	if wrapped, ok := input.(*tg.InvokeWithBusinessConnectionRequest); ok {
+		return "business:" + mtprotoMethod(wrapped.Query)
+	}
+	if named, ok := input.(interface{ TypeName() string }); ok {
+		return named.TypeName()
+	}
+	return fmt.Sprintf("%T", input)
 }
 
 type businessErrorMiddleware struct{}

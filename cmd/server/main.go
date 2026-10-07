@@ -12,6 +12,7 @@ import (
 	"telego-bot-api/internal/api"
 	"telego-bot-api/internal/botmanager"
 	"telego-bot-api/internal/config"
+	"telego-bot-api/internal/diag"
 	"telego-bot-api/internal/logging"
 	"telego-bot-api/internal/storage"
 	"telego-bot-api/internal/webhook"
@@ -34,6 +35,11 @@ func main() {
 		zap.String("redis_addr", cfg.RedisAddr),
 		zap.Int("outbound_ips", len(cfg.OutboundIPs)),
 	)
+
+	diag.Configure(cfg.StallDumpDir, logger)
+	if cfg.StallDumpDir != "" {
+		logger.Info("Stall goroutine dumps enabled", zap.String("dir", cfg.StallDumpDir))
+	}
 
 	// 1. Initialize Redis Store
 	rdb := storage.NewRedisStore(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
