@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/redis/go-redis/v9"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -17,6 +19,7 @@ import (
 	"github.com/gotd/td/tg"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"telego-bot-api/internal/converter"
 	"telego-bot-api/internal/storage"
 	"telego-bot-api/internal/webhook"
@@ -38,7 +41,6 @@ func deliveryTestBot(t *testing.T, id int64) *BotInstance {
 	b.redisStore = store
 	b.botID = id
 	b.token = fmt.Sprintf("delivery-test:%d", id)
-	b.updateNotify = make(chan struct{}, 1)
 	return b
 }
 
@@ -124,10 +126,11 @@ func TestDeliveryRegressionWebhookAckKeepsUndeliveredUpdate(t *testing.T) {
 	t.Cleanup(server.Close)
 	b.dispatcher = webhook.NewDispatcher(1, 10, zap.NewNop())
 	t.Cleanup(func() { b.Stop(); b.dispatcher.Stop() })
-	require.NoError(t, b.SetWebhook(ctx, server.URL, "", false))
+	require.NoError(t, b.SetWebhook(ctx, server.URL, "", 0, false))
 	require.NoError(t, b.Handle(ctx, &tg.Updates{Updates: []tg.UpdateClass{
 		&tg.UpdateNewMessage{Message: &tg.Message{ID: 1, PeerID: &tg.PeerUser{UserID: 123}, Message: "first"}},
-		&tg.UpdateNewMessage{Message: &tg.Message{ID: 2, PeerID: &tg.PeerUser{UserID: 123}, Message: "second"}},
+		// Another chat: a failing update delays only its own chat.
+		&tg.UpdateNewMessage{Message: &tg.Message{ID: 2, PeerID: &tg.PeerUser{UserID: 456}, Message: "second"}},
 	}}))
 	var entries []storage.UpdateEntry
 	require.Eventually(t, func() bool {
@@ -142,7 +145,7 @@ func TestDeliveryRegressionSetWebhookDeliversPendingUpdates(t *testing.T) {
 	appendDeliveryTestUpdate(t, b, converter.Update{Message: &converter.Message{MessageID: 1}})
 	b.dispatcher = webhook.NewDispatcher(0, 10, zap.NewNop())
 	t.Cleanup(func() { b.Stop(); b.dispatcher.Stop() })
-	require.NoError(t, b.SetWebhook(context.Background(), "http://127.0.0.1:1/unused", "", false))
+	require.NoError(t, b.SetWebhook(context.Background(), "http://127.0.0.1:1/unused", "", 0, false))
 	require.Eventually(t, func() bool { return b.dispatcher.QueueSize() == 1 }, time.Second, 10*time.Millisecond, "existing pending update must be scheduled when installing a webhook")
 }
 
@@ -163,7 +166,7 @@ func TestWebhookRetryAfterReceiverRecovers(t *testing.T) {
 	t.Cleanup(func() { b.Stop(); b.dispatcher.Stop() })
 	appendDeliveryTestUpdate(t, b, converter.Update{Message: &converter.Message{MessageID: 1}})
 	ctx := context.Background()
-	require.NoError(t, b.SetWebhook(ctx, server.URL, "", false))
+	require.NoError(t, b.SetWebhook(ctx, server.URL, "", 0, false))
 	require.Eventually(t, func() bool {
 		wh, err := b.redisStore.GetWebhook(ctx, b.token)
 		return err == nil && wh != nil && wh.LastErrorMessage != ""
@@ -176,7 +179,7 @@ func TestWebhookRetryAfterReceiverRecovers(t *testing.T) {
 		count, err := b.redisStore.PendingUpdatesCount(ctx, b.botID)
 		return err == nil && count == 0
 	}, 5*time.Second, 10*time.Millisecond)
-	require.GreaterOrEqual(t, calls.Load(), int32(4))
+	require.GreaterOrEqual(t, calls.Load(), int32(2), "the failed update is retried")
 }
 
 func TestWebhookReplayAfterRestart(t *testing.T) {
@@ -191,7 +194,7 @@ func TestWebhookReplayAfterRestart(t *testing.T) {
 	t.Cleanup(func() { b.Stop(); b.dispatcher.Stop() })
 	appendDeliveryTestUpdate(t, b, converter.Update{Message: &converter.Message{MessageID: 1}})
 	ctx := context.Background()
-	require.NoError(t, b.SetWebhook(ctx, server.URL, "", false))
+	require.NoError(t, b.SetWebhook(ctx, server.URL, "", 0, false))
 	require.Eventually(t, func() bool { return b.dispatcher.QueueSize() == 1 }, time.Second, 10*time.Millisecond)
 	b.Stop()
 	// A fresh BotInstance restores exactly the same state/lifecycle hooks as Start.
@@ -232,7 +235,7 @@ func TestWebhookQueueOverflowRetainsUpdates(t *testing.T) {
 		appendDeliveryTestUpdate(t, b, converter.Update{Message: &converter.Message{MessageID: int64(i + 1)}})
 	}
 	ctx := context.Background()
-	require.NoError(t, b.SetWebhook(ctx, server.URL, "", false))
+	require.NoError(t, b.SetWebhook(ctx, server.URL, "", 0, false))
 	require.Eventually(t, func() bool {
 		count, err := b.redisStore.PendingUpdatesCount(ctx, b.botID)
 		return err == nil && count == 0
@@ -251,7 +254,7 @@ func TestDeleteWebhookPreservesPendingForPolling(t *testing.T) {
 	t.Cleanup(func() { b.Stop(); b.dispatcher.Stop() })
 	id := appendDeliveryTestUpdate(t, b, converter.Update{Message: &converter.Message{MessageID: 1}})
 	ctx := context.Background()
-	require.NoError(t, b.SetWebhook(ctx, "http://127.0.0.1:1/unused", "", false))
+	require.NoError(t, b.SetWebhook(ctx, "http://127.0.0.1:1/unused", "", 0, false))
 	require.Eventually(t, func() bool { return b.dispatcher.QueueSize() == 1 }, time.Second, 10*time.Millisecond)
 	require.NoError(t, b.DeleteWebhook(ctx, false))
 	require.False(t, b.HasWebhook())
@@ -283,4 +286,93 @@ func TestFilteredPollingWaitsForNewMatchingUpdate(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("matching update was not delivered")
 	}
+}
+
+func TestWebhookDeliversChatInOrder(t *testing.T) {
+	b := deliveryTestBot(t, 810)
+	var mu sync.Mutex
+	var received []int
+	failures := 2
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var update converter.Update
+		if json.NewDecoder(r.Body).Decode(&update) != nil {
+			w.WriteHeader(400)
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		received = append(received, int(update.Message.MessageID))
+		if update.Message.MessageID == 1 && failures > 0 {
+			failures--
+			w.WriteHeader(500)
+			return
+		}
+		w.WriteHeader(200)
+	}))
+	t.Cleanup(server.Close)
+	b.dispatcher = webhook.NewDispatcher(4, 10, zap.NewNop())
+	t.Cleanup(func() { b.Stop(); b.dispatcher.Stop() })
+	chat := converter.Chat{ID: 123, Type: "private"}
+	for i := 1; i <= 3; i++ {
+		appendDeliveryTestUpdate(t, b, converter.Update{Message: &converter.Message{MessageID: int64(i), Chat: chat}})
+	}
+	ctx := context.Background()
+	require.NoError(t, b.SetWebhook(ctx, server.URL, "", 0, false))
+	require.Eventually(t, func() bool {
+		count, err := b.redisStore.PendingUpdatesCount(ctx, b.botID)
+		return err == nil && count == 0
+	}, 10*time.Second, 20*time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, []int{1, 1, 1, 2, 3}, received, "later messages of a chat wait until the earlier one is accepted")
+}
+
+func TestUpdateWorkerSurvivesPanic(t *testing.T) {
+	b := deliveryTestBot(t, 811)
+	ctx := context.Background()
+	// Panic while the first batch is processed (after it was persisted).
+	var panicked atomic.Bool
+	b.logger = zap.New(zapcore.NewCore(zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
+		zapcore.AddSync(io.Discard), zap.DebugLevel), zap.Hooks(func(e zapcore.Entry) error {
+		if strings.HasPrefix(e.Message, "Update received") && panicked.CompareAndSwap(false, true) {
+			panic("boom")
+		}
+		return nil
+	}))
+	for i := 1; i <= 2; i++ {
+		require.NoError(t, b.Handle(ctx, &tg.UpdateShort{Update: &tg.UpdateNewMessage{
+			Message: &tg.Message{ID: i, PeerID: &tg.PeerUser{UserID: 123}, Message: "hi", Date: int(time.Now().Unix())},
+		}}))
+	}
+	require.Eventually(t, func() bool {
+		count, err := b.redisStore.PendingUpdatesCount(ctx, b.botID)
+		return err == nil && count == 2
+	}, 3*time.Second, 10*time.Millisecond, "the worker must keep processing after a panic")
+	require.True(t, panicked.Load())
+	b.stopUpdateWorker()
+}
+
+func TestLongPollingWakesOnNewUpdate(t *testing.T) {
+	b := deliveryTestBot(t, 812)
+	type result struct {
+		updates []*converter.Update
+		err     error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		updates, err := b.GetUpdates(context.Background(), 0, 100, 30, nil)
+		resultCh <- result{updates, err}
+	}()
+	time.Sleep(100 * time.Millisecond)
+	require.NoError(t, b.Handle(context.Background(), &tg.UpdateShort{Update: &tg.UpdateNewMessage{
+		Message: &tg.Message{ID: 1, PeerID: &tg.PeerUser{UserID: 123}, Message: "hi", Date: int(time.Now().Unix())},
+	}}))
+	select {
+	case got := <-resultCh:
+		require.NoError(t, got.err)
+		require.Len(t, got.updates, 1)
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiting getUpdates was not woken by a new update")
+	}
+	b.stopUpdateWorker()
 }

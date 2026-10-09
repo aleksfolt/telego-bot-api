@@ -691,7 +691,7 @@ func (s *Server) handleSetWebhook(ctx *fasthttp.RequestCtx, bot *botmanager.BotI
 		return
 	}
 
-	if err := bot.SetWebhook(context.Background(), req.URL, req.SecretToken, req.DropPendingUpdates); err != nil {
+	if err := bot.SetWebhook(context.Background(), req.URL, req.SecretToken, req.MaxConnections, req.DropPendingUpdates); err != nil {
 		s.respondError(ctx, 500, "Failed to save webhook: "+err.Error())
 		return
 	}

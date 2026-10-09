@@ -57,6 +57,8 @@ func cleanupBot(t *testing.T, botID int64) {
 		fmt.Sprintf("telego:update_id:%d", botID),
 		fmt.Sprintf("telego:mediacache:photo:%d", botID),
 		fmt.Sprintf("telego:mediacache:doc:%d", botID),
+		fmt.Sprintf("telego:mtproto_state:%d", botID),
+		fmt.Sprintf("telego:mtproto_channels:%d", botID),
 	)
 }
 

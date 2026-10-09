@@ -7,6 +7,7 @@ import (
 
 	"github.com/gotd/td/tg"
 	"go.uber.org/zap"
+	"telego-bot-api/internal/converter"
 	"telego-bot-api/internal/diag"
 )
 
@@ -63,11 +64,6 @@ func (b *BotInstance) stopUpdateWorker() {
 }
 
 func (b *BotInstance) runUpdateWorker(updates <-chan queuedUpdates, quit <-chan struct{}) {
-	defer func() {
-		if r := recover(); r != nil {
-			b.logger.Error("PANIC recovered in update worker", zap.Any("panic", r))
-		}
-	}()
 	for {
 		select {
 		case item := <-updates:
@@ -86,7 +82,16 @@ func (b *BotInstance) runUpdateWorker(updates <-chan queuedUpdates, quit <-chan 
 }
 
 // processQueued persists one queued batch, reporting batches that waited or ran too long.
+// A panic loses only this batch: if it stopped the worker, the queue would fill up and
+// Handle would block the MTProto read loop, hanging every request of the bot.
 func (b *BotInstance) processQueued(item queuedUpdates, backlog int) {
+	defer func() {
+		if r := recover(); r != nil {
+			b.logger.Error("PANIC recovered in update worker, batch lost", zap.Int64("bot_id", b.BotID()),
+				zap.String("type", fmt.Sprintf("%T", item.updates)), zap.Any("panic", r),
+				zap.Stack("stack"))
+		}
+	}()
 	if wait := time.Since(item.queuedAt); wait >= diag.SlowThreshold {
 		b.logger.Warn("Update queue stalled", zap.Int64("bot_id", b.BotID()),
 			zap.Duration("waited", wait), zap.Int("backlog", backlog))
@@ -137,4 +142,50 @@ func (b *BotInstance) appendUpdate(botID int64, updateID int, payload []byte) er
 	return b.retryRedis("append update", func(ctx context.Context) error {
 		return b.redisStore.AppendUpdate(ctx, botID, updateID, payload)
 	})
+}
+
+// newUpdatesSignal returns a channel that is closed when new updates are persisted.
+// Take it before reading the stream, so updates written in between are not missed.
+func (b *BotInstance) newUpdatesSignal() <-chan struct{} {
+	b.newUpdatesMu.Lock()
+	defer b.newUpdatesMu.Unlock()
+	if b.newUpdates == nil {
+		b.newUpdates = make(chan struct{})
+	}
+	return b.newUpdates
+}
+
+// broadcastNewUpdates wakes all getUpdates calls waiting for new updates.
+func (b *BotInstance) broadcastNewUpdates() {
+	b.newUpdatesMu.Lock()
+	defer b.newUpdatesMu.Unlock()
+	if b.newUpdates != nil {
+		close(b.newUpdates)
+		b.newUpdates = nil
+	}
+}
+
+// messageUpdateMaxAge matches the official Bot API: messages sent or edited more than
+// a day ago are not delivered, e.g. when getDifference catches up after a long downtime.
+const messageUpdateMaxAge = 24 * time.Hour
+
+func staleMessageUpdate(upd *converter.Update) bool {
+	var msg *converter.Message
+	switch {
+	case upd.Message != nil:
+		msg = upd.Message
+	case upd.EditedMessage != nil:
+		msg = upd.EditedMessage
+	case upd.ChannelPost != nil:
+		msg = upd.ChannelPost
+	case upd.EditedChannelPost != nil:
+		msg = upd.EditedChannelPost
+	default:
+		return false
+	}
+	date := msg.Date
+	if msg.EditDate != 0 {
+		date = msg.EditDate
+	}
+	return date != 0 && time.Since(time.Unix(int64(date), 0)) > messageUpdateMaxAge
 }

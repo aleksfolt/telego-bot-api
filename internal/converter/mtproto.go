@@ -25,10 +25,42 @@ func NewMTProtoConverter() *MTProtoConverter {
 // SetSelfUserID lets the converter distinguish my_chat_member from chat_member updates.
 func (c *MTProtoConverter) SetSelfUserID(id int64) { c.selfUserID = id }
 
+// skipMessageUpdate reports whether a message update must not reach the bot, like
+// need_skip_update_message in the official server: the bot's own outgoing messages
+// (they come back from getDifference and RPC results), except a few service messages.
+func skipMessageUpdate(m tg.MessageClass) bool {
+	switch msg := m.(type) {
+	case *tg.Message:
+		return msg.Out
+	case *tg.MessageService:
+		return msg.Out && !outgoingServiceDelivered(msg.Action)
+	}
+	return false
+}
+
+// outgoingServiceDelivered lists service messages the official Bot API delivers even
+// when the bot itself caused them.
+func outgoingServiceDelivered(action tg.MessageActionClass) bool {
+	switch action.(type) {
+	case *tg.MessageActionChatEditTitle, *tg.MessageActionChatEditPhoto, *tg.MessageActionChatDeletePhoto,
+		*tg.MessageActionChatDeleteUser, *tg.MessageActionSetChatTheme, *tg.MessageActionPinMessage,
+		*tg.MessageActionGeoProximityReached, *tg.MessageActionGroupCallScheduled, *tg.MessageActionGroupCall,
+		*tg.MessageActionInviteToGroupCall, *tg.MessageActionTopicCreate, *tg.MessageActionTopicEdit,
+		*tg.MessageActionGiveawayLaunch, *tg.MessageActionGiveawayResults, *tg.MessageActionPaymentRefunded,
+		*tg.MessageActionSuggestedPostApproval, *tg.MessageActionSuggestedPostSuccess,
+		*tg.MessageActionSuggestedPostRefund, *tg.MessageActionPollAppendAnswer, *tg.MessageActionPollDeleteAnswer:
+		return true
+	}
+	return false
+}
+
 // ConvertUpdate transforms an MTProto update into a Bot API Update struct.
 func (c *MTProtoConverter) ConvertUpdate(updateID int, u tg.UpdateClass, entities *EntityContext) (*Update, error) {
 	switch upd := u.(type) {
 	case *tg.UpdateNewMessage:
+		if skipMessageUpdate(upd.Message) {
+			return nil, nil
+		}
 		msg, err := c.ConvertMessage(upd.Message, entities)
 		if err != nil {
 			return nil, err
@@ -42,6 +74,9 @@ func (c *MTProtoConverter) ConvertUpdate(updateID int, u tg.UpdateClass, entitie
 		}, nil
 
 	case *tg.UpdateEditMessage:
+		if skipMessageUpdate(upd.Message) {
+			return nil, nil
+		}
 		msg, err := c.ConvertMessage(upd.Message, entities)
 		if err != nil {
 			return nil, err
@@ -55,6 +90,9 @@ func (c *MTProtoConverter) ConvertUpdate(updateID int, u tg.UpdateClass, entitie
 		}, nil
 
 	case *tg.UpdateNewChannelMessage:
+		if skipMessageUpdate(upd.Message) {
+			return nil, nil
+		}
 		msg, err := c.ConvertMessage(upd.Message, entities)
 		if err != nil {
 			return nil, err
@@ -71,6 +109,9 @@ func (c *MTProtoConverter) ConvertUpdate(updateID int, u tg.UpdateClass, entitie
 		return result, nil
 
 	case *tg.UpdateEditChannelMessage:
+		if skipMessageUpdate(upd.Message) {
+			return nil, nil
+		}
 		msg, err := c.ConvertMessage(upd.Message, entities)
 		if err != nil {
 			return nil, err

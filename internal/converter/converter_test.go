@@ -3,6 +3,7 @@ package converter_test
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"telego-bot-api/internal/converter"
 
@@ -580,4 +581,23 @@ func TestConvertUpdate_BusinessMessage_ReplyToSelfDestructPhoto(t *testing.T) {
 	assert.Contains(t, string(data), `"is_view_once":true`)
 	assert.Contains(t, string(data), `"has_protected_content":true`)
 	assert.Contains(t, string(data), `"file_id"`)
+}
+
+func TestConvertUpdateSkipsOwnMessages(t *testing.T) {
+	c := converter.NewMTProtoConverter()
+	now := int(time.Now().Unix())
+	peer := &tg.PeerChat{ChatID: 10}
+
+	got, err := c.ConvertUpdate(1, &tg.UpdateNewMessage{Message: &tg.Message{ID: 1, Out: true, PeerID: peer, Date: now, Message: "mine"}}, nil)
+	require.NoError(t, err)
+	assert.Nil(t, got, "the bot's own messages are not delivered")
+
+	got, err = c.ConvertUpdate(1, &tg.UpdateNewMessage{Message: &tg.MessageService{ID: 3, Out: true, PeerID: peer, Date: now,
+		Action: &tg.MessageActionPinMessage{}}}, nil)
+	require.NoError(t, err)
+	assert.NotNil(t, got, "a pinned message service message is delivered even when caused by the bot")
+
+	got, err = c.ConvertUpdate(1, &tg.UpdateNewMessage{Message: &tg.Message{ID: 4, PeerID: peer, Date: now, Message: "hi"}}, nil)
+	require.NoError(t, err)
+	assert.NotNil(t, got)
 }

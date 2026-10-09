@@ -48,6 +48,22 @@ func (s *Storage) ForgetUser(userID int64) {
 	s.mu.Unlock()
 }
 
+// UserHash returns a stored user access_hash.
+func (s *Storage) UserHash(userID int64) (int64, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	hash, ok := s.userHashes[userID]
+	return hash, ok
+}
+
+// ChannelHash returns a stored channel/supergroup access_hash.
+func (s *Storage) ChannelHash(channelID int64) (int64, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	hash, ok := s.chanHashes[channelID]
+	return hash, ok
+}
+
 // SaveChannel saves channel/supergroup access_hash.
 func (s *Storage) SaveChannel(channelID, accessHash int64) {
 	s.mu.Lock()

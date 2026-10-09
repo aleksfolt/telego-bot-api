@@ -33,6 +33,7 @@ import (
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/dcs"
 	"github.com/gotd/td/telegram/downloader"
+	"github.com/gotd/td/telegram/updates"
 	"github.com/gotd/td/telegram/uploader"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
@@ -46,6 +47,7 @@ type BotInstance struct {
 	appHash    string
 	client     *telegram.Client
 	rawClient  atomic.Pointer[tg.Client]
+	gaps       *updates.Manager
 	peers      *peer.Storage
 	converter  *converter.MTProtoConverter
 	dispatcher *webhook.Dispatcher
@@ -55,6 +57,7 @@ type BotInstance struct {
 	mu              sync.RWMutex
 	webhookURL      string
 	secretToken     string
+	webhookMaxConns int
 	self            *converter.User
 	lastSelfRefresh time.Time
 	selfRefreshing  atomic.Bool
@@ -70,8 +73,11 @@ type BotInstance struct {
 	savedPeers   map[int64]int64
 	// botID is the Telegram user ID of the bot, used as the Redis Stream key.
 	// Set to 0 until authentication completes.
-	botID        int64
-	updateNotify chan struct{}
+	botID int64
+	// newUpdates is closed and replaced whenever updates are persisted. It wakes every
+	// long-polling getUpdates of the bot without holding a Redis connection while waiting.
+	newUpdatesMu sync.Mutex
+	newUpdates   chan struct{}
 
 	// onRevoked is called once when Telegram rejects the token permanently after startup.
 	onRevoked func(*BotInstance)
@@ -128,7 +134,6 @@ func NewBotInstance(
 		redisStore:      redisStore,
 		logger:          logger.With(zap.String("token_prefix", token[:min(10, len(token))])),
 		botID:           botID,
-		updateNotify:    make(chan struct{}, 1),
 		busConns:        make(map[string]*converter.BusinessConnection),
 		busConnDCs:      make(map[string]int),
 		businessDCPools: make(map[int]telegram.CloseInvoker),
@@ -148,11 +153,13 @@ func NewBotInstance(
 		}
 	}
 
+	bot.gaps = newGapManager(bot)
 	opts := telegram.Options{
 		SessionStorage: redisStore.SessionStorage(token),
-		UpdateHandler:  bot,
+		UpdateHandler:  bot.gaps,
 		Logger:         logzap.New(logging.MTProtoLogger(logger, mtprotoDebug)),
-		Middlewares:    []telegram.Middleware{stallMiddleware{bot: bot}, retryMiddleware{logger: logger}, businessErrorMiddleware{}},
+		Middlewares: []telegram.Middleware{stallMiddleware{bot: bot}, retryMiddleware{logger: logger},
+			businessErrorMiddleware{}, gapUpdatesMiddleware{bot: bot}},
 	}
 
 	if dialer != nil {
@@ -276,15 +283,6 @@ func (b *BotInstance) Start(ctx context.Context) error {
 	errChan := make(chan error, 1)
 
 	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				b.logger.Error("PANIC recovered in bot client loop",
-					zap.Any("panic", r),
-					zap.String("token_prefix", b.token[:min(10, len(b.token))]),
-				)
-			}
-		}()
-
 		backoff := 1 * time.Second
 		maxBackoff := 30 * time.Second
 		firstRun := true
@@ -294,7 +292,7 @@ func (b *BotInstance) Start(ctx context.Context) error {
 				return
 			}
 
-			runErr := b.client.Run(ctx, func(runCtx context.Context) error {
+			runErr := b.runClientRecovered(ctx, func(runCtx context.Context) error {
 				// Connected successfully: reset backoff
 				backoff = 1 * time.Second
 				b.rawClient.Store(b.client.API())
@@ -374,9 +372,14 @@ func (b *BotInstance) Start(ctx context.Context) error {
 					close(b.ready)
 				}
 
-				// Keep alive until context is cancelled (persistent 24/7 connection)
-				<-runCtx.Done()
-				return runCtx.Err()
+				if user == nil {
+					// Keep alive until context is cancelled (persistent 24/7 connection)
+					<-runCtx.Done()
+					return runCtx.Err()
+				}
+				// Track pts/qts for the lifetime of the connection: catches up on updates
+				// missed while disconnected and recovers gaps.
+				return b.runGapManager(runCtx, user.ID)
 			})
 
 			if ctx.Err() != nil {
@@ -454,6 +457,22 @@ func (b *BotInstance) Start(ctx context.Context) error {
 	}
 }
 
+// runClientRecovered runs one MTProto connection. A panic in the connection callback is
+// turned into an error, so the client loop reconnects instead of leaving the bot
+// registered but permanently disconnected.
+func (b *BotInstance) runClientRecovered(ctx context.Context, f func(context.Context) error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			b.logger.Error("PANIC recovered in bot client loop, reconnecting",
+				zap.Any("panic", r), zap.Stack("stack"),
+				zap.String("token_prefix", b.token[:min(10, len(b.token))]),
+			)
+			err = fmt.Errorf("panic in MTProto client: %v", r)
+		}
+	}()
+	return b.client.Run(ctx, f)
+}
+
 // IsTokenRevoked reports whether err means the bot token is permanently invalid
 // (revoked in BotFather, expired, or the bot was deleted), so reconnecting is pointless.
 func IsTokenRevoked(err error) bool {
@@ -486,27 +505,15 @@ func (b *BotInstance) processUpdates(u tg.UpdatesClass) {
 	case *tg.UpdateShort:
 		updatesList = []tg.UpdateClass{upds.Update}
 	case *tg.UpdateShortMessage:
-		if botID == 0 {
-			b.logger.Warn("Skipping update: botID not yet set")
-			return
+		// Short updates reach this point only before the gap manager starts; it converts
+		// them to regular updates afterwards.
+		if !upds.Out {
+			extraUpdates = append(extraUpdates, b.converter.ConvertShortMessage(0, upds))
 		}
-		uid, err := b.nextUpdateID(botID)
-		if err != nil {
-			b.logger.Error("Update lost: failed to allocate update_id", zap.Error(err))
-			return
-		}
-		extraUpdates = append(extraUpdates, b.converter.ConvertShortMessage(uid, upds))
 	case *tg.UpdateShortChatMessage:
-		if botID == 0 {
-			b.logger.Warn("Skipping update: botID not yet set")
-			return
+		if !upds.Out {
+			extraUpdates = append(extraUpdates, b.converter.ConvertShortChatMessage(0, upds))
 		}
-		uid, err := b.nextUpdateID(botID)
-		if err != nil {
-			b.logger.Error("Update lost: failed to allocate update_id", zap.Error(err))
-			return
-		}
-		extraUpdates = append(extraUpdates, b.converter.ConvertShortChatMessage(uid, upds))
 	default:
 		b.logger.Debug("Unhandled MTProto update type", zap.String("type", fmt.Sprintf("%T", u)))
 	}
@@ -517,13 +524,9 @@ func (b *BotInstance) processUpdates(u tg.UpdatesClass) {
 	}
 
 	for _, rawUpd := range updatesList {
-		uid, err := b.nextUpdateID(botID)
-		if err != nil {
-			b.logger.Error("Update lost: failed to allocate update_id",
-				zap.String("type", fmt.Sprintf("%T", rawUpd)), zap.Error(err))
-			continue
-		}
-		converted, err := b.converter.ConvertUpdate(uid, rawUpd, entities)
+		// Convert first: most MTProto updates (statuses, own outgoing messages) produce no
+		// Bot API update and must not spend an update_id round trip.
+		converted, err := b.converter.ConvertUpdate(0, rawUpd, entities)
 		if err != nil {
 			b.logger.Warn("Failed to convert update", zap.Error(err))
 			continue
@@ -545,7 +548,18 @@ func (b *BotInstance) processUpdates(u tg.UpdatesClass) {
 	}
 
 	// Persist each update to Redis Stream and optionally enqueue webhook delivery.
+	persisted := 0
 	for _, upd := range extraUpdates {
+		if staleMessageUpdate(upd) {
+			continue
+		}
+		uid, err := b.nextUpdateID(botID)
+		if err != nil {
+			b.logger.Error("Update lost: failed to allocate update_id",
+				zap.String("type", updateKind(upd)), zap.Error(err))
+			continue
+		}
+		upd.UpdateID = uid
 		payload, err := json.Marshal(upd)
 		if err != nil {
 			b.logger.Warn("Failed to marshal update for Redis", zap.Error(err))
@@ -557,6 +571,7 @@ func (b *BotInstance) processUpdates(u tg.UpdatesClass) {
 				zap.Int("update_id", upd.UpdateID), zap.String("type", updateKind(upd)))
 			continue
 		}
+		persisted++
 
 		kind := updateKind(upd)
 		sender := describeUpdateSender(upd)
@@ -581,12 +596,14 @@ func (b *BotInstance) processUpdates(u tg.UpdatesClass) {
 
 	metrics.DefaultRegistry.IncUpdatesReceived(len(extraUpdates))
 
-	// Notify long-polling listeners
-	select {
-	case b.updateNotify <- struct{}{}:
-	default:
+	if persisted > 0 {
+		b.broadcastNewUpdates()
 	}
 }
+
+// pollRecheckInterval bounds how long a waiting getUpdates relies only on the in-process
+// signal; the recheck picks up updates written to the stream by anything else.
+const pollRecheckInterval = 5 * time.Second
 
 // GetUpdates retrieves buffered updates from Redis Streams for long-polling.
 func (b *BotInstance) GetUpdates(ctx context.Context, offset, limit, timeout int, allowedUpdates []string) ([]*converter.Update, error) {
@@ -628,25 +645,17 @@ func (b *BotInstance) GetUpdates(ctx context.Context, offset, limit, timeout int
 	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 
 	for {
-		remaining := time.Until(deadline)
-		if remaining < 0 {
-			remaining = 0
-		}
-
-		// Use blocking read only when we still have time budget left and there are
-		// no results yet. Cap block at remaining to respect the HTTP timeout.
-		blockDuration := time.Duration(0)
-		if timeout > 0 && remaining > 0 {
-			blockDuration = remaining
-		}
-
-		readCtx, readCancel := context.WithTimeout(ctx, remaining+2*time.Second)
+		// Long polling waits in-process instead of in XREAD BLOCK: a blocked read holds a
+		// pooled Redis connection for the whole timeout, and with many polling bots the
+		// pool runs dry and stalls update persistence of every bot.
+		signal := b.newUpdatesSignal()
+		readCtx, readCancel := context.WithTimeout(ctx, 5*time.Second)
 		var entries []storage.UpdateEntry
 		var err error
 		if cursor == "" {
-			entries, err = b.redisStore.ReadUpdates(readCtx, botID, readOffset, limit, blockDuration)
+			entries, err = b.redisStore.ReadUpdates(readCtx, botID, readOffset, limit, 0)
 		} else {
-			entries, err = b.redisStore.ReadUpdatesAfter(readCtx, botID, cursor, limit, blockDuration)
+			entries, err = b.redisStore.ReadUpdatesAfter(readCtx, botID, cursor, limit, 0)
 		}
 		readCancel()
 
@@ -672,20 +681,30 @@ func (b *BotInstance) GetUpdates(ctx context.Context, offset, limit, timeout int
 				res = append(res, &upd)
 			}
 		}
-
-		if len(res) > 0 || (len(entries) == 0 && (timeout == 0 || time.Now().After(deadline))) {
-			if res == nil {
-				return []*converter.Update{}, nil
-			}
+		if len(res) > 0 {
 			return res, nil
 		}
+		if len(entries) > 0 {
+			// Everything read was filtered out by allowed_updates: read on.
+			continue
+		}
 
-		// ReadUpdates already blocked in Redis; loop back to check deadline.
+		remaining := time.Until(deadline)
+		if timeout == 0 || remaining <= 0 {
+			return []*converter.Update{}, nil
+		}
+		if remaining > pollRecheckInterval {
+			remaining = pollRecheckInterval
+		}
+		timer := time.NewTimer(remaining)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return nil, ctx.Err()
-		default:
+		case <-signal:
+		case <-timer.C:
 		}
+		timer.Stop()
 	}
 }
 
@@ -831,18 +850,20 @@ func (b *BotInstance) DropPendingUpdates(ctx context.Context) error {
 }
 
 // SetWebhook sets the webhook URL for the bot and persists it to Redis.
+// maxConnections bounds simultaneous deliveries (0 means the default of 40).
 // If dropPending is true, all pending updates are discarded.
-func (b *BotInstance) SetWebhook(ctx context.Context, url, secretToken string, dropPending bool) error {
+func (b *BotInstance) SetWebhook(ctx context.Context, url, secretToken string, maxConnections int, dropPending bool) error {
 	b.webhookMu.Lock()
 	defer b.webhookMu.Unlock()
 	b.stopWebhookDeliveryLocked()
 	defer b.startWebhookDeliveryLocked()
-	data := &storage.WebhookData{URL: url, SecretToken: secretToken, UpdatedAt: time.Now()}
+	maxConnections = normalizeWebhookConnections(maxConnections)
+	data := &storage.WebhookData{URL: url, SecretToken: secretToken, MaxConnections: maxConnections, UpdatedAt: time.Now()}
 	if err := b.redisStore.SaveWebhook(ctx, b.token, data); err != nil {
 		return err
 	}
 	b.mu.Lock()
-	b.webhookURL, b.secretToken = url, secretToken
+	b.webhookURL, b.secretToken, b.webhookMaxConns = url, secretToken, maxConnections
 	b.mu.Unlock()
 	if dropPending {
 		return b.DropPendingUpdates(ctx)
@@ -884,7 +905,7 @@ func (b *BotInstance) GetWebhookInfo(ctx context.Context) (*converter.WebhookInf
 		URL:                  url,
 		HasCustomCertificate: false,
 		PendingUpdateCount:   pendingCount,
-		MaxConnections:       40,
+		MaxConnections:       defaultWebhookConnections,
 	}
 
 	if wh, err := b.redisStore.GetWebhook(ctx, b.token); err == nil && wh != nil {
