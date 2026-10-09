@@ -159,3 +159,17 @@ func TestMapErrorStringUnauthorizedOnlyForBotAuthErrors(t *testing.T) {
 		require.NotEqual(t, 401, code, desc)
 	}
 }
+
+func TestMapErrorStringTransientErrorsAreNotBadRequest(t *testing.T) {
+	for desc, want := range map[string]int{
+		"Bad Request: get channel participant: context deadline exceeded":                     504,
+		"Bad Request: get channel participant: engine forcibly closed":                        502,
+		"get channel participant: rpcDoRequest: rpc error code 500: INTERNAL":                 500,
+		"get channel participant: rpcDoRequest: rpc error code -503: Timeout":                 500,
+		"Bad Request: get channel participant: rpc error code 400: USER_ID_INVALID":           400,
+		"Bad Request: invalid payload: json: cannot unmarshal string into Go value of type x": 400,
+	} {
+		code, _, _ := MapErrorString(desc)
+		require.Equal(t, want, code, desc)
+	}
+}

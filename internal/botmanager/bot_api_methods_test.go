@@ -8,6 +8,7 @@ import (
 
 	"github.com/gotd/td/bin"
 	"github.com/gotd/td/tg"
+	"github.com/gotd/td/tgerr"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"telego-bot-api/internal/converter"
@@ -400,4 +401,39 @@ func TestHandleDoesNotBlockOnRedis(t *testing.T) {
 	}
 	// Handle runs on the MTProto read loop and must only enqueue.
 	require.Less(t, time.Since(start), 500*time.Millisecond)
+}
+
+func TestGetChatMemberRetriesWithoutStaleAccessHash(t *testing.T) {
+	var hashes []int64
+	b := mediaTestBot(func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
+		request := input.(*tg.ChannelsGetParticipantRequest)
+		user := request.Participant.(*tg.InputPeerUser)
+		hashes = append(hashes, user.AccessHash)
+		if user.AccessHash != 0 {
+			return tgerr.New(400, "USER_ID_INVALID")
+		}
+		output.(*tg.ChannelsChannelParticipant).Participant = &tg.ChannelParticipant{UserID: 456}
+		return nil
+	})
+	b.peers.SaveChannel(77, 5)
+	b.peers.SaveUser(456, 999)
+
+	member, err := b.GetChatMember(context.Background(), &converter.GetChatMemberRequest{ChatID: -1000000000077, UserID: 456})
+	require.NoError(t, err)
+	require.Equal(t, "member", member.(*converter.ChatMember).Status)
+	require.Equal(t, []int64{999, 0}, hashes)
+
+	peer, err := b.peers.ResolvePeer(456)
+	require.Error(t, err, "the rejected access_hash must be forgotten, got %v", peer)
+}
+
+func TestGetChatMemberReportsNonParticipantAsLeft(t *testing.T) {
+	b := mediaTestBot(func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
+		return tgerr.New(400, "USER_NOT_PARTICIPANT")
+	})
+	b.peers.SaveChannel(77, 5)
+
+	member, err := b.GetChatMember(context.Background(), &converter.GetChatMemberRequest{ChatID: -1000000000077, UserID: 456})
+	require.NoError(t, err)
+	require.Equal(t, "left", member.(*converter.ChatMember).Status)
 }

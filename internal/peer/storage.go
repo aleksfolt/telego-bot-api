@@ -41,6 +41,13 @@ func (s *Storage) SaveUser(userID, accessHash int64) {
 	s.mu.Unlock()
 }
 
+// ForgetUser drops a stored user access_hash, e.g. after Telegram rejected it.
+func (s *Storage) ForgetUser(userID int64) {
+	s.mu.Lock()
+	delete(s.userHashes, userID)
+	s.mu.Unlock()
+}
+
 // SaveChannel saves channel/supergroup access_hash.
 func (s *Storage) SaveChannel(channelID, accessHash int64) {
 	s.mu.Lock()
@@ -56,12 +63,14 @@ func (s *Storage) SaveChat(chatID int64) {
 }
 
 // IngestPeers extracts and saves peers from incoming MTProto entities.
+// "Min" constructors are skipped: their access_hash is not valid for this bot and
+// would overwrite a valid one (TDLib ignores min access hashes as well).
 func (s *Storage) IngestPeers(users []tg.UserClass, chats []tg.ChatClass) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	for _, u := range users {
-		if user, ok := u.(*tg.User); ok && user.AccessHash != 0 {
+		if user, ok := u.(*tg.User); ok && user.AccessHash != 0 && !user.Min {
 			s.userHashes[user.ID] = user.AccessHash
 		}
 	}
@@ -69,7 +78,7 @@ func (s *Storage) IngestPeers(users []tg.UserClass, chats []tg.ChatClass) {
 	for _, c := range chats {
 		switch chat := c.(type) {
 		case *tg.Channel:
-			if chat.AccessHash != 0 {
+			if chat.AccessHash != 0 && !chat.Min {
 				s.chanHashes[chat.ID] = chat.AccessHash
 			}
 		case *tg.Chat:

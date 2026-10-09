@@ -140,6 +140,13 @@ func MapErrorString(desc string) (int, string, *converter.ResponseParameters) {
 		return 400, "Bad Request: BUSINESS_PEER_INVALID", nil
 	}
 
+	// 6. Transient failures must not look like a permanent Bad Request: clients decide
+	// on the status code whether to retry (e.g. a subscription check treats a 400 as
+	// "not subscribed" but skips the check on 5xx).
+	if code, text, ok := mapTransientError(desc); ok {
+		return code, text, nil
+	}
+
 	// Clean up "rpc error code 400: ..." prefix if present
 	clean := desc
 	if strings.HasPrefix(clean, "rpc error code ") {
@@ -153,4 +160,28 @@ func MapErrorString(desc string) (int, string, *converter.ResponseParameters) {
 	}
 
 	return 400, clean, nil
+}
+
+var telegramServerErrorRegex = regexp.MustCompile(`rpc error code (?:5\d\d|-50[0-9])\b`)
+
+// mapTransientError recognizes errors caused by timeouts, MTProto reconnects and
+// Telegram server-side failures, which succeed when retried.
+func mapTransientError(desc string) (int, string, bool) {
+	lower := strings.ToLower(desc)
+	switch {
+	case strings.Contains(lower, "context deadline exceeded") || strings.Contains(lower, "i/o timeout"):
+		return 504, "Gateway Timeout: request to Telegram timed out", true
+	case strings.Contains(lower, "engine forcibly closed") ||
+		strings.Contains(lower, "connection closed") ||
+		strings.Contains(lower, "connection reset") ||
+		strings.Contains(lower, "broken pipe"):
+		return 502, "Bad Gateway: connection to Telegram was interrupted, retry the request", true
+	case telegramServerErrorRegex.MatchString(desc):
+		clean := desc
+		if i := strings.Index(desc, "rpc error code "); i >= 0 {
+			clean = desc[i:]
+		}
+		return 500, "Internal Server Error: " + clean, true
+	}
+	return 0, "", false
 }

@@ -750,6 +750,22 @@ func updateAllowed(update *converter.Update, allowed []string) bool {
 	return false
 }
 
+// forgetUserPeer drops a cached user access_hash from memory and Redis.
+func (b *BotInstance) forgetUserPeer(userID int64) {
+	b.peers.ForgetUser(userID)
+	b.savedPeersMu.Lock()
+	delete(b.savedPeers, userID)
+	b.savedPeersMu.Unlock()
+	if b.redisStore == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := b.redisStore.DeletePeer(ctx, b.token, userID); err != nil {
+		b.logger.Warn("Failed to delete stale peer from Redis", zap.Int64("user_id", userID), zap.Error(err))
+	}
+}
+
 // savePeersToRedis persists access hashes of new or changed peers with a single HSET.
 // Peers already saved with the same hash are skipped, so busy groups do not issue a
 // Redis write per member on every update.
@@ -770,13 +786,14 @@ func (b *BotInstance) savePeersToRedis(users []tg.UserClass, chats []tg.ChatClas
 		fields[strconv.FormatInt(id, 10)] = fmt.Sprintf("%d:%s", hash, peerType)
 		saved[id] = hash
 	}
+	// Min constructors carry an access_hash that is not valid for this bot.
 	for _, u := range users {
-		if user, ok := u.(*tg.User); ok {
+		if user, ok := u.(*tg.User); ok && !user.Min {
 			add(user.ID, user.AccessHash, "user")
 		}
 	}
 	for _, c := range chats {
-		if channel, ok := c.(*tg.Channel); ok {
+		if channel, ok := c.(*tg.Channel); ok && !channel.Min {
 			add(-1000000000000-channel.ID, channel.AccessHash, "channel")
 		}
 	}
@@ -2670,10 +2687,24 @@ func (b *BotInstance) GetChatMember(ctx context.Context, req *converter.GetChatM
 		if err != nil {
 			return nil, fmt.Errorf("resolve user: %w", err)
 		}
+		channel := &tg.InputChannel{ChannelID: chat.ChannelID, AccessHash: chat.AccessHash}
 		res, err := b.raw().ChannelsGetParticipant(ctx, &tg.ChannelsGetParticipantRequest{
-			Channel:     &tg.InputChannel{ChannelID: chat.ChannelID, AccessHash: chat.AccessHash},
-			Participant: participant,
+			Channel: channel, Participant: participant,
 		})
+		if user, ok := participant.(*tg.InputPeerUser); ok && user.AccessHash != 0 &&
+			tgerr.Is(err, "USER_ID_INVALID", "PARTICIPANT_ID_INVALID", "PEER_ID_INVALID") {
+			// A stale or foreign access_hash was cached for this user. Forget it and
+			// retry the way TDLib addresses unknown users from bots: with a zero hash.
+			b.forgetUserPeer(req.UserID)
+			res, err = b.raw().ChannelsGetParticipant(ctx, &tg.ChannelsGetParticipantRequest{
+				Channel: channel, Participant: &tg.InputPeerUser{UserID: req.UserID},
+			})
+		}
+		if tgerr.Is(err, "USER_NOT_PARTICIPANT") {
+			// Like the official Bot API, a non-member is reported as "left", not as an error.
+			member := converter.ChatMember{Status: "left", User: &converter.User{ID: req.UserID}}
+			return &member, nil
+		}
 		if err != nil {
 			return nil, fmt.Errorf("get channel participant: %w", err)
 		}

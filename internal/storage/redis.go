@@ -198,6 +198,11 @@ func (r *RedisStore) SavePeers(ctx context.Context, token string, peers map[stri
 	return r.client.HSet(ctx, fmt.Sprintf("telego:peers:%s", token), peers).Err()
 }
 
+// DeletePeer removes a stored peer, e.g. after Telegram rejected its access_hash.
+func (r *RedisStore) DeletePeer(ctx context.Context, token string, chatID int64) error {
+	return r.client.HDel(ctx, fmt.Sprintf("telego:peers:%s", token), strconv.FormatInt(chatID, 10)).Err()
+}
+
 // GetPeer retrieves access_hash and peer_type for a chat_id.
 func (r *RedisStore) GetPeer(ctx context.Context, token string, chatID int64) (int64, string, bool, error) {
 	val, err := r.client.HGet(ctx, fmt.Sprintf("telego:peers:%s", token), strconv.FormatInt(chatID, 10)).Result()
