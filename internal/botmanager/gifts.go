@@ -18,7 +18,7 @@ func (b *BotInstance) invokeMaybeBusiness(ctx context.Context, connectionID stri
 	if connectionID != "" {
 		return b.invokeBusiness(ctx, connectionID, query, output)
 	}
-	return b.client.Invoke(ctx, query, output)
+	return b.mtClient().Invoke(ctx, query, output)
 }
 
 // parseOwnedGiftID converts a Bot API owned_gift_id to an MTProto saved gift reference.

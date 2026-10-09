@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -42,12 +43,25 @@ import (
 
 // BotInstance represents an active MTProto bot session.
 type BotInstance struct {
-	token      string
-	appID      int
-	appHash    string
+	token   string
+	appID   int
+	appHash string
+	// client is replaced on every reconnect of the client loop: a gotd client cannot
+	// be run again once Run returned. Read it with mtClient.
+	clientMu   sync.RWMutex
 	client     *telegram.Client
+	clientOpts telegram.Options
 	rawClient  atomic.Pointer[tg.Client]
 	gaps       *updates.Manager
+
+	// intake decouples the MTProto connection from the gap manager; see updateIntake.
+	intake               updateIntake
+	intakeOverflowLogged atomic.Bool
+	watchdog             clientWatchdog
+	// runCancel stops the current MTProto client run (used by the watchdog).
+	runCancelMu sync.Mutex
+	runCancel   context.CancelFunc
+
 	peers      *peer.Storage
 	converter  *converter.MTProtoConverter
 	dispatcher *webhook.Dispatcher
@@ -93,6 +107,9 @@ type BotInstance struct {
 	businessDCPools   map[int]telegram.CloseInvoker
 	businessCurrentDC func() int
 	businessDCFactory func(context.Context, int) (telegram.CloseInvoker, error)
+
+	downloadsOnce sync.Once
+	downloads     chan struct{}
 
 	mediaCacheMu sync.RWMutex
 	mediaCache   map[string]*tg.InputPhoto
@@ -156,10 +173,10 @@ func NewBotInstance(
 	bot.gaps = newGapManager(bot)
 	opts := telegram.Options{
 		SessionStorage: redisStore.SessionStorage(token),
-		UpdateHandler:  bot.gaps,
+		UpdateHandler:  intakeHandler{bot: bot},
 		Logger:         logzap.New(logging.MTProtoLogger(logger, mtprotoDebug)),
-		Middlewares: []telegram.Middleware{stallMiddleware{bot: bot}, retryMiddleware{logger: logger},
-			businessErrorMiddleware{}, gapUpdatesMiddleware{bot: bot}},
+		Middlewares: []telegram.Middleware{syncDeadlineMiddleware{bot: bot}, stallMiddleware{bot: bot},
+			retryMiddleware{logger: logger}, businessErrorMiddleware{}, gapUpdatesMiddleware{bot: bot}},
 	}
 
 	if dialer != nil {
@@ -168,14 +185,33 @@ func NewBotInstance(
 		})
 	}
 
+	bot.clientOpts = opts
 	bot.client = telegram.NewClient(appID, appHash, opts)
 	bot.businessCurrentDC = func() int {
-		return bot.client.Config().ThisDC
+		return bot.mtClient().Config().ThisDC
 	}
 	bot.businessDCFactory = func(ctx context.Context, dcID int) (telegram.CloseInvoker, error) {
-		return bot.client.DC(ctx, dcID, 2)
+		return bot.mtClient().DC(ctx, dcID, 2)
 	}
 	return bot
+}
+
+// mtClient returns the current MTProto client.
+func (b *BotInstance) mtClient() *telegram.Client {
+	b.clientMu.RLock()
+	defer b.clientMu.RUnlock()
+	return b.client
+}
+
+// replaceClient creates a fresh MTProto client for the next run of the client loop.
+// Business DC pools belong to the old client and are closed with it.
+func (b *BotInstance) replaceClient() *telegram.Client {
+	b.closeBusinessInvokers()
+	client := telegram.NewClient(b.appID, b.appHash, b.clientOpts)
+	b.clientMu.Lock()
+	b.client = client
+	b.clientMu.Unlock()
+	return client
 }
 
 type retryMiddleware struct {
@@ -282,24 +318,36 @@ func (b *BotInstance) Start(ctx context.Context) error {
 
 	errChan := make(chan error, 1)
 
+	go b.runIntake(ctx)
+	go b.runWatchdog(ctx)
+
 	go func() {
 		backoff := 1 * time.Second
 		maxBackoff := 30 * time.Second
 		firstRun := true
+		client := b.mtClient()
 
-		for {
+		for iteration := 0; ; iteration++ {
 			if ctx.Err() != nil {
 				return
 			}
+			if iteration > 0 {
+				// A gotd client cannot be run twice: Run fails with "client already closed".
+				client = b.replaceClient()
+			}
+			runCtx, cancelRun := context.WithCancel(ctx)
+			b.runCancelMu.Lock()
+			b.runCancel = cancelRun
+			b.runCancelMu.Unlock()
 
-			runErr := b.runClientRecovered(ctx, func(runCtx context.Context) error {
+			runErr := b.runClientRecovered(runCtx, client, func(runCtx context.Context) error {
 				// Connected successfully: reset backoff
 				backoff = 1 * time.Second
-				b.rawClient.Store(b.client.API())
+				b.rawClient.Store(client.API())
 
 				var user *tg.User
 				// Fast path: check if existing session from Redis is already authorized
-				status, statusErr := b.client.Auth().Status(runCtx)
+				status, statusErr := client.Auth().Status(runCtx)
 				if statusErr == nil && status != nil && status.Authorized && status.User != nil {
 					// Verify with Telegram DC that the cached session's auth key is still active
 					users, pingErr := b.raw().UsersGetUsers(runCtx, []tg.InputUserClass{&tg.InputUserSelf{}})
@@ -320,7 +368,7 @@ func (b *BotInstance) Start(ctx context.Context) error {
 
 				if user == nil {
 					// Authenticate bot using token
-					auth, err := b.client.Auth().Bot(runCtx, b.token)
+					auth, err := client.Auth().Bot(runCtx, b.token)
 					if err != nil {
 						return fmt.Errorf("bot auth failed: %w", err)
 					}
@@ -381,6 +429,7 @@ func (b *BotInstance) Start(ctx context.Context) error {
 				// missed while disconnected and recovers gaps.
 				return b.runGapManager(runCtx, user.ID)
 			})
+			cancelRun()
 
 			if ctx.Err() != nil {
 				// Stopped intentionally (server shutdown or bot closed)
@@ -460,7 +509,7 @@ func (b *BotInstance) Start(ctx context.Context) error {
 // runClientRecovered runs one MTProto connection. A panic in the connection callback is
 // turned into an error, so the client loop reconnects instead of leaving the bot
 // registered but permanently disconnected.
-func (b *BotInstance) runClientRecovered(ctx context.Context, f func(context.Context) error) (err error) {
+func (b *BotInstance) runClientRecovered(ctx context.Context, client *telegram.Client, f func(context.Context) error) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			b.logger.Error("PANIC recovered in bot client loop, reconnecting",
@@ -470,7 +519,7 @@ func (b *BotInstance) runClientRecovered(ctx context.Context, f func(context.Con
 			err = fmt.Errorf("panic in MTProto client: %v", r)
 		}
 	}()
-	return b.client.Run(ctx, f)
+	return client.Run(ctx, f)
 }
 
 // IsTokenRevoked reports whether err means the bot token is permanently invalid
@@ -3560,8 +3609,23 @@ func (b *BotInstance) DownloadFile(ctx context.Context, fileIDStr string, w io.W
 		return fmt.Errorf("cannot convert file_id to input file location")
 	}
 
+	release, err := b.acquireDownloadSlot(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	pw := &progressWriter{w: w}
+	stopWatch := watchDownloadProgress(ctx, pw, cancel)
+	defer stopWatch()
+
 	d := downloader.NewDownloader()
-	_, err = d.Download(b.raw(), loc).Stream(ctx, w)
+	_, err = d.Download(b.raw(), loc).Stream(ctx, pw)
+	if cause := context.Cause(ctx); errors.Is(cause, ErrDownloadStalled) {
+		return cause
+	}
 	return err
 }
 

@@ -2,7 +2,12 @@ package botmanager
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"time"
+
+	"telego-bot-api/internal/diag"
+	"telego-bot-api/internal/metrics"
 
 	"github.com/gotd/log/logzap"
 	"github.com/gotd/td/bin"
@@ -86,13 +91,12 @@ func (m gapUpdatesMiddleware) Handle(next tg.Invoker) telegram.InvokeFunc {
 		}
 		switch out := output.(type) {
 		case *tg.UpdatesBox:
-			if err := m.bot.gaps.Handle(ctx, out.Updates); err != nil {
-				m.bot.logger.Warn("Failed to pass RPC result updates to the gap manager", zap.Error(err))
-			}
+			// Through the intake: a stuck gap manager must not hang API requests.
+			m.bot.intake.push(intakeItem{updates: out.Updates})
 		case *tg.MessagesAffectedMessages:
-			m.handleAffected(ctx, input, out.Pts, out.PtsCount)
+			m.handleAffected(input, out.Pts, out.PtsCount)
 		case *tg.MessagesAffectedHistory:
-			m.handleAffected(ctx, input, out.Pts, out.PtsCount)
+			m.handleAffected(input, out.Pts, out.PtsCount)
 		}
 		return nil
 	}
@@ -100,7 +104,7 @@ func (m gapUpdatesMiddleware) Handle(next tg.Invoker) telegram.InvokeFunc {
 
 // handleAffected routes the pts of an affected-messages result to its channel, or to the
 // common sequence, the same way as gotd's hook.AffectedHook.
-func (m gapUpdatesMiddleware) handleAffected(ctx context.Context, input bin.Encoder, pts, ptsCount int) {
+func (m gapUpdatesMiddleware) handleAffected(input bin.Encoder, pts, ptsCount int) {
 	type hasChannelID interface{ GetChannelID() int64 }
 	var channelID int64
 	if req, ok := input.(interface{ GetChannel() tg.InputChannelClass }); ok {
@@ -114,9 +118,7 @@ func (m gapUpdatesMiddleware) handleAffected(ctx context.Context, input bin.Enco
 			channelID = channel.GetChannelID()
 		}
 	}
-	if err := m.bot.gaps.HandleAffected(ctx, channelID, pts, ptsCount); err != nil {
-		m.bot.logger.Warn("Failed to pass affected pts to the gap manager", zap.Error(err))
-	}
+	m.bot.intake.push(intakeItem{affected: &affectedPts{channelID: channelID, pts: pts, ptsCount: ptsCount}})
 }
 
 // gapAccessHasher gives the gap manager access hashes known to the bot: in memory first,
@@ -169,4 +171,204 @@ func (h gapAccessHasher) storedPeer(ctx context.Context, chatID int64, peerType 
 		return 0, false, err
 	}
 	return hash, true, nil
+}
+
+// updatesSyncTimeout bounds updates.getDifference, getChannelDifference and getState.
+// They have no deadline of their own: on a dead connection the gap manager waited for
+// the answer forever and stopped processing updates. Overridden in tests.
+var updatesSyncTimeout = 60 * time.Second
+
+// syncStallAfter is when a running sync request is reported to the watchdog as stalled.
+var syncStallAfter = diag.StallThreshold
+
+func isUpdatesSyncRequest(input bin.Encoder) bool {
+	switch input.(type) {
+	case *tg.UpdatesGetDifferenceRequest, *tg.UpdatesGetChannelDifferenceRequest, *tg.UpdatesGetStateRequest:
+		return true
+	}
+	return false
+}
+
+// syncDeadlineMiddleware applies updatesSyncTimeout to update synchronization requests
+// and reports the ones that stalled to the watchdog. Other requests are untouched:
+// upload.getFile and uploads may legitimately run long.
+type syncDeadlineMiddleware struct {
+	bot *BotInstance
+}
+
+func (m syncDeadlineMiddleware) Handle(next tg.Invoker) telegram.InvokeFunc {
+	return func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
+		if !isUpdatesSyncRequest(input) {
+			return next.Invoke(ctx, input, output)
+		}
+		ctx, cancel := context.WithTimeout(ctx, updatesSyncTimeout)
+		defer cancel()
+		// Report the stall while the request is still stuck, not only when it ends.
+		stalled := time.AfterFunc(syncStallAfter, m.bot.watchdog.noteSyncStall)
+		defer stalled.Stop()
+		err := next.Invoke(ctx, input, output)
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			m.bot.logger.Warn("Updates sync request timed out", zap.String("method", mtprotoMethod(input)),
+				zap.Duration("timeout", updatesSyncTimeout), zap.Error(err))
+		}
+		return err
+	}
+}
+
+// affectedPts is a pts change from a messages.affectedMessages/affectedHistory result.
+type affectedPts struct {
+	channelID     int64
+	pts, ptsCount int
+}
+
+type intakeItem struct {
+	updates  tg.UpdatesClass
+	affected *affectedPts
+}
+
+// intakeMaxItems bounds the intake. When the gap manager is stuck this long, further
+// updates are dropped: those with pts/qts are refetched by getDifference later.
+const intakeMaxItems = 100_000
+
+// updateIntake buffers updates between the MTProto connection and the gap manager.
+//
+// gotd calls the update handler from per-message goroutines of a connection, and the
+// connection read loop waits for them before it can close. The gap manager's Push blocks
+// while the manager waits for getDifference on that same connection, so after a network
+// drop a direct call deadlocked the bot: the read loop could not finish, the connection
+// could not reconnect and getDifference never got an answer. push never blocks; a
+// per-bot goroutine feeds the gap manager.
+type updateIntake struct {
+	mu       sync.Mutex
+	items    []intakeItem
+	wake     chan struct{}
+	dropped  int
+	progress time.Time // when the feeder last handed an item to the gap manager
+	busy     bool      // the feeder is inside the gap manager
+}
+
+func (q *updateIntake) wakeChan() chan struct{} {
+	if q.wake == nil {
+		q.wake = make(chan struct{}, 1)
+	}
+	return q.wake
+}
+
+// push adds an item without blocking. It returns false if the item was dropped.
+func (q *updateIntake) push(item intakeItem) bool {
+	q.mu.Lock()
+	if len(q.items) >= intakeMaxItems {
+		q.dropped++
+		q.mu.Unlock()
+		return false
+	}
+	q.items = append(q.items, item)
+	wake := q.wakeChan()
+	q.mu.Unlock()
+	select {
+	case wake <- struct{}{}:
+	default:
+	}
+	return true
+}
+
+// pop takes all queued items.
+func (q *updateIntake) pop() ([]intakeItem, int) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	items, dropped := q.items, q.dropped
+	q.items, q.dropped = nil, 0
+	return items, dropped
+}
+
+func (q *updateIntake) setBusy(busy bool) {
+	q.mu.Lock()
+	q.busy = busy
+	q.progress = time.Now()
+	q.mu.Unlock()
+}
+
+// stuckFor reports how long the feeder has been unable to hand pending items to the
+// gap manager (0 when it keeps up).
+func (q *updateIntake) stuckFor(now time.Time) time.Duration {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if !q.busy || len(q.items) == 0 || q.progress.IsZero() {
+		return 0
+	}
+	return now.Sub(q.progress)
+}
+
+func (q *updateIntake) waitChan() <-chan struct{} {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.wakeChan()
+}
+
+// runIntake feeds the gap manager from the intake until ctx is done.
+func (b *BotInstance) runIntake(ctx context.Context) {
+	wake := b.intake.waitChan()
+	for {
+		items, dropped := b.intake.pop()
+		if len(items) > 0 {
+			b.intakeOverflowLogged.Store(false)
+		}
+		if dropped > 0 {
+			b.logger.Error("Update intake overflowed while the gap manager was stuck; dropped updates",
+				zap.Int("dropped", dropped))
+		}
+		for _, item := range items {
+			b.intake.setBusy(true)
+			var err error
+			if item.affected != nil {
+				err = b.gaps.HandleAffected(ctx, item.affected.channelID, item.affected.pts, item.affected.ptsCount)
+			} else {
+				err = b.gaps.Handle(ctx, item.updates)
+			}
+			b.intake.setBusy(false)
+			if ctx.Err() != nil {
+				return
+			}
+			if err != nil {
+				b.logger.Warn("Gap manager rejected updates", zap.Error(err))
+			}
+		}
+		if len(items) > 0 {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-wake:
+		}
+	}
+}
+
+// intakeHandler is the update handler of the MTProto client: it only queues updates.
+type intakeHandler struct {
+	bot *BotInstance
+}
+
+func (h intakeHandler) Handle(_ context.Context, u tg.UpdatesClass) error {
+	h.bot.touch()
+	h.bot.watchdog.noteUpdates(time.Now(), countUpdates(u))
+	metrics.DefaultRegistry.RecordBotUpdates(h.bot.BotID(), countUpdates(u))
+	if !h.bot.intake.push(intakeItem{updates: u}) && h.bot.intakeOverflowLogged.CompareAndSwap(false, true) {
+		h.bot.logger.Error("Update intake is full, dropping updates until the gap manager catches up",
+			zap.Int("limit", intakeMaxItems))
+	}
+	return nil
+}
+
+// countUpdates returns how many updates an MTProto batch carries.
+func countUpdates(u tg.UpdatesClass) int {
+	switch u := u.(type) {
+	case *tg.Updates:
+		return len(u.Updates)
+	case *tg.UpdatesCombined:
+		return len(u.Updates)
+	case *tg.UpdatesTooLong:
+		return 0
+	}
+	return 1
 }

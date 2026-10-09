@@ -1563,7 +1563,14 @@ func (s *Server) handleDownloadFile(ctx *fasthttp.RequestCtx) {
 
 	if err := bot.DownloadFile(c, fileID, ctx); err != nil {
 		s.logger.Error("DownloadFile failed", zap.Error(err))
-		s.respondError(ctx, 404, "File not found: "+err.Error())
+		switch {
+		case errors.Is(err, botmanager.ErrTooManyDownloads):
+			s.respondError(ctx, 429, "Too Many Requests: "+err.Error())
+		case errors.Is(err, botmanager.ErrDownloadStalled) || errors.Is(err, context.DeadlineExceeded):
+			s.respondError(ctx, 504, "Gateway Timeout: "+err.Error())
+		default:
+			s.respondError(ctx, 404, "File not found: "+err.Error())
+		}
 		return
 	}
 }

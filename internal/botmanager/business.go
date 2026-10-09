@@ -157,10 +157,11 @@ func (b *BotInstance) rawBusinessInvoker(ctx context.Context, dcID int) (tg.Invo
 	// auth.exportAuthorization only accepts a different target DC. Reuse the
 	// primary client when the business connection already belongs to its DC.
 	if b.businessCurrentDC != nil && b.businessCurrentDC() == dcID {
-		if b.client == nil {
+		client := b.mtClient()
+		if client == nil {
 			return nil, fmt.Errorf("primary datacenter client is unavailable")
 		}
-		return b.client, nil
+		return client, nil
 	}
 
 	return telegram.InvokeFunc(func(callCtx context.Context, input bin.Encoder, output bin.Decoder) error {

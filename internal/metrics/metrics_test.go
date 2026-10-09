@@ -62,3 +62,17 @@ func TestRegistry_ObserveDurationConcurrentFirstUse(t *testing.T) {
 	r.WritePrometheus(&buf, 0, 0, 0)
 	require.Contains(t, buf.String(), `telego_request_duration_seconds_count{method="getMe"} 64`)
 }
+
+func TestRegistry_BotActivity(t *testing.T) {
+	r := NewRegistry()
+	r.RecordBotUpdates(42, 3)
+	r.IncWatchdogRestarts(42)
+	var buf bytes.Buffer
+	r.WritePrometheus(&buf, 1, 0, 0)
+	out := buf.String()
+	if !strings.Contains(out, `telego_bot_updates_received_total{bot_id="42"} 3`) ||
+		!strings.Contains(out, `telego_bot_seconds_since_last_update{bot_id="42"} 0`) ||
+		!strings.Contains(out, `telego_bot_watchdog_restarts_total{bot_id="42"} 1`) {
+		t.Fatalf("missing per-bot metrics:\n%s", out)
+	}
+}

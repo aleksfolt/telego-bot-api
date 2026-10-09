@@ -363,6 +363,22 @@ sudo journalctl -u telego-bot-api --since "24 hours ago" -o cat --no-pager |
   jq -Rrc --argjson id "$USER_ID" 'fromjson? | select(.user_id == $id or .chat_id == $id)'
 ```
 
+### Зависшие MTProto-соединения
+
+Синхронизация updates (`updates.getDifference`, `getChannelDifference`, `getState`) ограничена 60 секундами. Updates от соединения сначала попадают в буфер, поэтому зависший gap-менеджер не блокирует соединение и оно может переподключиться. Watchdog пересоздаёт MTProto-клиента бота, если бот с трафиком (не меньше 60 updates за 10 минут) 4 минуты не получает updates и при этом синхронизация зависла. Перезапуск не чаще раза в 10 минут, в логе: `MTProto client watchdog`. Скачивание файлов `/file/...`: не больше 8 одновременно на бота (иначе `429`), скачивание без прогресса 60 секунд обрывается (`504`).
+
+Метрики на `/metrics`:
+- `telego_bot_updates_received_total{bot_id}` — updates, полученные ботом от Telegram;
+- `telego_bot_seconds_since_last_update{bot_id}` — секунд с последнего update;
+- `telego_bot_watchdog_restarts_total{bot_id}` — перезапуски клиента watchdog'ом.
+
+Пример алерта: бот с заметным трафиком 5 минут не получает updates.
+
+```
+telego_bot_seconds_since_last_update > 300
+  and on(bot_id) rate(telego_bot_updates_received_total[30m] offset 5m) > 0.1
+```
+
 `Webhook delivered successfully` означает HTTP-ответ `2xx` от приложения бота. Обработка обновления и отправка ответа происходят в приложении, поэтому его ошибки нужно искать в логах самого приложения. Доставленные обновления удаляются из Redis Stream и позже недоступны для поиска по ID.
 
 ---

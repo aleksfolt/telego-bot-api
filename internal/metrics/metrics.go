@@ -23,7 +23,71 @@ type Registry struct {
 	webhookDeliveries sync.RWMutex
 	webhookStatus     map[string]*atomic.Uint64 // key: status
 
+	// Per-bot update activity, for alerts on bots that stopped receiving updates.
+	bots sync.Map // bot_id -> *botActivity
+
 	startTime time.Time
+}
+
+type botActivity struct {
+	updates          atomic.Uint64
+	lastUpdate       atomic.Int64 // UnixNano
+	watchdogRestarts atomic.Uint64
+}
+
+func (r *Registry) bot(botID int64) *botActivity {
+	if a, ok := r.bots.Load(botID); ok {
+		return a.(*botActivity)
+	}
+	a, _ := r.bots.LoadOrStore(botID, &botActivity{})
+	return a.(*botActivity)
+}
+
+// RecordBotUpdates records n updates received from Telegram by a bot.
+func (r *Registry) RecordBotUpdates(botID int64, n int) {
+	if botID == 0 || n <= 0 {
+		return
+	}
+	a := r.bot(botID)
+	a.updates.Add(uint64(n))
+	a.lastUpdate.Store(time.Now().UnixNano())
+}
+
+// IncWatchdogRestarts counts MTProto clients recreated by the watchdog.
+func (r *Registry) IncWatchdogRestarts(botID int64) {
+	r.bot(botID).watchdogRestarts.Add(1)
+}
+
+func (r *Registry) writeBotActivity(w io.Writer, now time.Time) {
+	var ids []int64
+	r.bots.Range(func(key, _ any) bool {
+		ids = append(ids, key.(int64))
+		return true
+	})
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+	fmt.Fprintf(w, "# HELP telego_bot_updates_received_total Updates received from Telegram per bot\n")
+	fmt.Fprintf(w, "# TYPE telego_bot_updates_received_total counter\n")
+	for _, id := range ids {
+		fmt.Fprintf(w, "telego_bot_updates_received_total{bot_id=\"%d\"} %d\n", id, r.bot(id).updates.Load())
+	}
+	fmt.Fprintln(w)
+
+	fmt.Fprintf(w, "# HELP telego_bot_seconds_since_last_update Seconds since the bot last received an update from Telegram\n")
+	fmt.Fprintf(w, "# TYPE telego_bot_seconds_since_last_update gauge\n")
+	for _, id := range ids {
+		if last := r.bot(id).lastUpdate.Load(); last != 0 {
+			fmt.Fprintf(w, "telego_bot_seconds_since_last_update{bot_id=\"%d\"} %.0f\n", id, now.Sub(time.Unix(0, last)).Seconds())
+		}
+	}
+	fmt.Fprintln(w)
+
+	fmt.Fprintf(w, "# HELP telego_bot_watchdog_restarts_total MTProto clients recreated by the watchdog\n")
+	fmt.Fprintf(w, "# TYPE telego_bot_watchdog_restarts_total counter\n")
+	for _, id := range ids {
+		fmt.Fprintf(w, "telego_bot_watchdog_restarts_total{bot_id=\"%d\"} %d\n", id, r.bot(id).watchdogRestarts.Load())
+	}
+	fmt.Fprintln(w)
 }
 
 var DefaultRegistry = NewRegistry()
@@ -192,6 +256,7 @@ func (r *Registry) WritePrometheus(w io.Writer, activeBots, hibernatedBots, webh
 	fmt.Fprintf(w, "# HELP telego_updates_received_total Total updates received from MTProto\n")
 	fmt.Fprintf(w, "# TYPE telego_updates_received_total counter\n")
 	fmt.Fprintf(w, "telego_updates_received_total %d\n\n", r.updatesReceived.Load())
+	r.writeBotActivity(w, now)
 
 	// 6. Webhooks
 	fmt.Fprintf(w, "# HELP telego_webhook_deliveries_total Total webhook delivery attempts\n")
