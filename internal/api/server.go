@@ -18,6 +18,7 @@ import (
 	"telego-bot-api/internal/config"
 	"telego-bot-api/internal/converter"
 	"telego-bot-api/internal/diag"
+	"telego-bot-api/internal/logging"
 	"telego-bot-api/internal/metrics"
 	"telego-bot-api/internal/webhook"
 
@@ -234,7 +235,10 @@ func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 		}
 		if status >= 400 {
 			s.logger.Warn("API Request", fields...)
-		} else {
+		} else if ok, skipped := logging.Sample(logging.EventAPIRequest, botID); ok {
+			if skipped > 0 {
+				fields = append(fields, zap.Int("sampled_out", skipped))
+			}
 			s.logger.Info("API Request", fields...)
 		}
 	}()

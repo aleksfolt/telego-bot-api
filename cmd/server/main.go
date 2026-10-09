@@ -28,6 +28,7 @@ func main() {
 		panic(err)
 	}
 	defer logger.Sync() //nolint:errcheck
+	logging.ConfigureSampling(cfg.LogSampleFirst, cfg.LogSampleThereafter)
 
 	logger.Info("Initializing telego-bot-api gateway",
 		zap.Int("app_id", cfg.AppID),

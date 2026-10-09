@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"telego-bot-api/internal/converter"
+	"telego-bot-api/internal/logging"
 	"telego-bot-api/internal/metrics"
 
 	"github.com/valyala/fasthttp"
@@ -177,12 +178,18 @@ func (d *Dispatcher) sendWebhook(req *fasthttp.Request, resp *fasthttp.Response,
 		if err == nil {
 			statusCode := resp.StatusCode()
 			if statusCode >= 200 && statusCode < 300 {
-				d.logger.Info("Webhook delivered successfully",
-					zap.Int64("bot_id", task.BotID),
-					zap.String("url", task.URL),
-					zap.Int("update_id", task.Update.UpdateID),
-					zap.Int("status", statusCode),
-				)
+				if ok, skipped := logging.Sample(logging.EventWebhookDelivery, task.BotID); ok {
+					fields := []zap.Field{
+						zap.Int64("bot_id", task.BotID),
+						zap.String("url", task.URL),
+						zap.Int("update_id", task.Update.UpdateID),
+						zap.Int("status", statusCode),
+					}
+					if skipped > 0 {
+						fields = append(fields, zap.Int("sampled_out", skipped))
+					}
+					d.logger.Info("Webhook delivered successfully", fields...)
+				}
 				return nil
 			}
 			// The application received the update; the delivery loop retries it with backoff.

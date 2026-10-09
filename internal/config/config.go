@@ -11,21 +11,26 @@ import (
 
 // Config contains runtime configuration parameters for telego-bot-api.
 type Config struct {
-	AppID            int
-	AppHash          string
-	HTTPAddr         string
-	OutboundIPs      []string
-	RedisAddr        string
-	RedisPassword    string
-	RedisDB          int
-	LogLevel         string
-	LogFormat        string
-	MTProtoDebug     bool
-	PprofAddr        string
-	WarmupAll        bool
-	HTTPReadTimeout  time.Duration
-	HTTPWriteTimeout time.Duration
-	HTTPIdleTimeout  time.Duration
+	AppID         int
+	AppHash       string
+	HTTPAddr      string
+	OutboundIPs   []string
+	RedisAddr     string
+	RedisPassword string
+	RedisDB       int
+	LogLevel      string
+	LogFormat     string
+	// LogSampleFirst and LogSampleThereafter sample per-event log lines per bot: the
+	// first LogSampleFirst lines of a bot in a second, then every LogSampleThereafter-th
+	// (<= 1 logs everything).
+	LogSampleFirst      int
+	LogSampleThereafter int
+	MTProtoDebug        bool
+	PprofAddr           string
+	WarmupAll           bool
+	HTTPReadTimeout     time.Duration
+	HTTPWriteTimeout    time.Duration
+	HTTPIdleTimeout     time.Duration
 	// PublicStatus exposes /health, /status and /metrics to public IPs.
 	// By default they answer only loopback and private-network clients.
 	PublicStatus bool
@@ -37,20 +42,22 @@ type Config struct {
 // Load loads configuration from environment variables and command-line flags.
 func Load() *Config {
 	cfg := &Config{
-		AppID:            2040,
-		AppHash:          "b18441a1ff607e10a989891a5462e627",
-		HTTPAddr:         "127.0.0.1:8081",
-		StallDumpDir:     filepath.Join(os.TempDir(), "telego-stalls"),
-		OutboundIPs:      nil,
-		RedisAddr:        "127.0.0.1:6379",
-		RedisPassword:    "",
-		RedisDB:          0,
-		LogLevel:         "info",
-		LogFormat:        "console",
-		MTProtoDebug:     false,
-		HTTPReadTimeout:  30 * time.Minute,  // generous enough for 2GB uploads on slow links, but bounds stuck clients
-		HTTPWriteTimeout: 600 * time.Second, // 10 minutes to allow multi-part MTProto uploads and downloads
-		HTTPIdleTimeout:  60 * time.Second,  // keep-alive idle connection timeout
+		AppID:               2040,
+		AppHash:             "b18441a1ff607e10a989891a5462e627",
+		HTTPAddr:            "127.0.0.1:8081",
+		StallDumpDir:        filepath.Join(os.TempDir(), "telego-stalls"),
+		OutboundIPs:         nil,
+		RedisAddr:           "127.0.0.1:6379",
+		RedisPassword:       "",
+		RedisDB:             0,
+		LogLevel:            "info",
+		LogFormat:           "console",
+		LogSampleFirst:      5,
+		LogSampleThereafter: 100,
+		MTProtoDebug:        false,
+		HTTPReadTimeout:     30 * time.Minute,  // generous enough for 2GB uploads on slow links, but bounds stuck clients
+		HTTPWriteTimeout:    600 * time.Second, // 10 minutes to allow multi-part MTProto uploads and downloads
+		HTTPIdleTimeout:     60 * time.Second,  // keep-alive idle connection timeout
 	}
 
 	if val := getEnv("TELEGO_API_ID", "TELEGRAM_API_ID", "API_ID"); val != "" {
@@ -83,6 +90,16 @@ func Load() *Config {
 	}
 	if val := getEnv("TELEGO_LOG_FORMAT", "LOG_FORMAT"); val != "" {
 		cfg.LogFormat = val
+	}
+	if val := getEnv("TELEGO_LOG_SAMPLE_FIRST", "LOG_SAMPLE_FIRST"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil {
+			cfg.LogSampleFirst = n
+		}
+	}
+	if val := getEnv("TELEGO_LOG_SAMPLE_THEREAFTER", "LOG_SAMPLE_THEREAFTER"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil {
+			cfg.LogSampleThereafter = n
+		}
 	}
 	if val := getEnv("TELEGO_MTPROTO_DEBUG", "MTPROTO_DEBUG"); val == "true" || val == "1" {
 		cfg.MTProtoDebug = true
@@ -132,6 +149,8 @@ func Load() *Config {
 	flag.IntVar(&cfg.RedisDB, "redis-db", cfg.RedisDB, "Redis database number")
 	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "Log level: debug, info, warn, error")
 	flag.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "Log format: console (human-readable colors) or json (production)")
+	flag.IntVar(&cfg.LogSampleFirst, "log-sample-first", cfg.LogSampleFirst, "Per-event log lines (updates, webhook deliveries, API requests) written in full per bot per second")
+	flag.IntVar(&cfg.LogSampleThereafter, "log-sample-thereafter", cfg.LogSampleThereafter, "After log-sample-first, write every Nth per-event line of a bot (<= 1 disables sampling)")
 	flag.BoolVar(&cfg.MTProtoDebug, "mtproto-debug", cfg.MTProtoDebug, "Enable verbose wire-level MTProto transport debug dumps (default: false)")
 	flag.StringVar(&cfg.StallDumpDir, "stall-dump-dir", cfg.StallDumpDir, "Directory for automatic goroutine dumps on stalls (empty disables)")
 	flag.StringVar(&cfg.PprofAddr, "pprof-addr", cfg.PprofAddr, "Optional address for pprof HTTP server (e.g. 127.0.0.1:6060)")

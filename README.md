@@ -276,6 +276,8 @@ export TELEGO_LOG_FORMAT="console"
 | `--redis-db` | `TELEGO_REDIS_DB` / `REDIS_DB` | `0` | Номер базы Redis |
 | `--log-level` | `TELEGO_LOG_LEVEL` / `LOG_LEVEL` | `info` | Уровень логов (`debug`, `info`, `warn`, `error`) |
 | `--log-format` | `TELEGO_LOG_FORMAT` / `LOG_FORMAT` | `console` | Формат логов: `console` (цветной текст) или `json` (для production/ELK) |
+| `--log-sample-first` | `TELEGO_LOG_SAMPLE_FIRST` | `5` | Сколько построчных логов (updates, доставки webhook, успешные API-запросы) бота за секунду пишется полностью |
+| `--log-sample-thereafter` | `TELEGO_LOG_SAMPLE_THEREAFTER` | `100` | Дальше пишется каждая N-я такая строка бота; `1` отключает сэмплирование |
 | `--mtproto-debug` | `TELEGO_MTPROTO_DEBUG` | `false` | Подробный дамп кадров MTProto wire transport |
 | `--outbound-ips` | `TELEGO_OUTBOUND_IPS` | `""` | Список локальных исходящих IP через запятую |
 
@@ -354,6 +356,8 @@ bot.launch();
     ]
   }
   ```
+
+Построчные логи (`Update received`, `Webhook delivered successfully`, успешные `API Request`) сэмплируются отдельно для каждого бота: первые 5 строк в секунду пишутся полностью, дальше каждая сотая, а в записанной строке поле `sampled_out` показывает, сколько пропущено. Боты с небольшим трафиком логируются целиком; у загруженного бота поиск по `user_id` находит не все события. Предупреждения и ошибки не сэмплируются. Логи MTProto (`mtproto.*`) содержат `bot_id` и `dc_id`.
 
 При `--log-format=json` входящие обновления содержат `user_id`, если у события есть отправитель, а ошибки методов отправки содержат `chat_id`. Для поиска событий и ошибок конкретного пользователя в логах systemd:
 

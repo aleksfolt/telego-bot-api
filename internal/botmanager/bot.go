@@ -174,7 +174,7 @@ func NewBotInstance(
 	opts := telegram.Options{
 		SessionStorage: redisStore.SessionStorage(token),
 		UpdateHandler:  intakeHandler{bot: bot},
-		Logger:         logzap.New(logging.MTProtoLogger(logger, mtprotoDebug)),
+		Logger:         logzap.New(logging.MTProtoLogger(logger.With(zap.Int64("bot_id", botID)), mtprotoDebug)),
 		Middlewares: []telegram.Middleware{syncDeadlineMiddleware{bot: bot}, stallMiddleware{bot: bot},
 			retryMiddleware{logger: logger}, businessErrorMiddleware{}, gapUpdatesMiddleware{bot: bot}},
 	}
@@ -625,31 +625,43 @@ func (b *BotInstance) processUpdates(u tg.UpdatesClass) {
 		}
 		persisted++
 
-		kind := updateKind(upd)
-		sender := describeUpdateSender(upd)
-		fields := []zap.Field{
-			zap.Int("update_id", upd.UpdateID),
-			zap.String("type", kind),
-			zap.String("from", sender),
-		}
-		if userID := updateSenderID(upd); userID != 0 {
-			fields = append(fields, zap.Int64("user_id", userID))
-		}
-		if chatID := updateChatID(upd); chatID != 0 {
-			fields = append(fields, zap.Int64("chat_id", chatID))
-		}
 		if url != "" {
 			b.notifyWebhookDelivery()
-			b.logger.Info("Update received -> Webhook", fields...)
-		} else {
-			b.logger.Info("Update received -> Polling stream", fields...)
 		}
+		b.logUpdateReceived(botID, upd, url != "")
 	}
 
 	metrics.DefaultRegistry.IncUpdatesReceived(len(extraUpdates))
 
 	if persisted > 0 {
 		b.broadcastNewUpdates()
+	}
+}
+
+// logUpdateReceived logs a persisted update, sampled per bot (see logging.Sample).
+func (b *BotInstance) logUpdateReceived(botID int64, upd *converter.Update, webhook bool) {
+	ok, skipped := logging.Sample(logging.EventUpdate, botID)
+	if !ok {
+		return
+	}
+	fields := []zap.Field{
+		zap.Int("update_id", upd.UpdateID),
+		zap.String("type", updateKind(upd)),
+		zap.String("from", describeUpdateSender(upd)),
+	}
+	if userID := updateSenderID(upd); userID != 0 {
+		fields = append(fields, zap.Int64("user_id", userID))
+	}
+	if chatID := updateChatID(upd); chatID != 0 {
+		fields = append(fields, zap.Int64("chat_id", chatID))
+	}
+	if skipped > 0 {
+		fields = append(fields, zap.Int("sampled_out", skipped))
+	}
+	if webhook {
+		b.logger.Info("Update received -> Webhook", fields...)
+	} else {
+		b.logger.Info("Update received -> Polling stream", fields...)
 	}
 }
 
@@ -1216,7 +1228,7 @@ func (b *BotInstance) SendMessage(ctx context.Context, req *converter.SendMessag
 		if err != nil {
 			b.logger.Warn("Failed to parse reply markup", zap.Error(err))
 		} else {
-			b.logger.Info("SendMessage with reply_markup", zap.ByteString("raw", req.ReplyMarkup))
+			b.logger.Debug("SendMessage with reply_markup", zap.ByteString("raw", req.ReplyMarkup))
 		}
 		sendReq.ReplyMarkup = markup
 	}
