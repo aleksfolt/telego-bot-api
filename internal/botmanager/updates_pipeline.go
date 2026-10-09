@@ -189,3 +189,12 @@ func staleMessageUpdate(upd *converter.Update) bool {
 	}
 	return date != 0 && time.Since(time.Unix(int64(date), 0)) > messageUpdateMaxAge
 }
+
+// replayedQtsUpdate reports a qts-sequenced update without a qts position. Telegram puts
+// bot business updates into every updates.difference with qts 0 and the gap manager
+// dispatches them each time (on reconnects, gaps and its 15-minute idle check), so the
+// bot would receive business messages it already got. TDLib drops such updates too.
+func replayedQtsUpdate(u tg.UpdateClass) bool {
+	q, ok := u.(interface{ GetQts() int })
+	return ok && q.GetQts() == 0
+}

@@ -524,6 +524,9 @@ func (b *BotInstance) processUpdates(u tg.UpdatesClass) {
 	}
 
 	for _, rawUpd := range updatesList {
+		if replayedQtsUpdate(rawUpd) {
+			continue
+		}
 		// Convert first: most MTProto updates (statuses, own outgoing messages) produce no
 		// Bot API update and must not spend an update_id round trip.
 		converted, err := b.converter.ConvertUpdate(0, rawUpd, entities)

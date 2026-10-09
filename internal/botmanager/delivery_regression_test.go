@@ -376,3 +376,30 @@ func TestLongPollingWakesOnNewUpdate(t *testing.T) {
 	}
 	b.stopUpdateWorker()
 }
+
+func TestQtsZeroUpdatesFromDifferenceAreNotRedelivered(t *testing.T) {
+	b := deliveryTestBot(t, 813)
+	ctx := context.Background()
+	message := func(id int) *tg.Message {
+		return &tg.Message{ID: id, PeerID: &tg.PeerUser{UserID: 123}, FromID: &tg.PeerUser{UserID: 456},
+			Message: "hi", Date: int(time.Now().Unix())}
+	}
+	// Replayed inside updates.difference: qts 0.
+	require.NoError(t, b.Handle(ctx, &tg.Updates{Updates: []tg.UpdateClass{
+		&tg.UpdateBotNewBusinessMessage{ConnectionID: "business-test", Message: message(1)},
+	}}))
+	// Pushed by Telegram: a real qts.
+	require.NoError(t, b.Handle(ctx, &tg.Updates{Updates: []tg.UpdateClass{
+		&tg.UpdateBotNewBusinessMessage{ConnectionID: "business-test", Message: message(2), Qts: 7},
+	}}))
+	require.Eventually(t, func() bool {
+		count, err := b.redisStore.PendingUpdatesCount(ctx, b.botID)
+		return err == nil && count == 1
+	}, 3*time.Second, 10*time.Millisecond)
+	updates, err := b.GetUpdates(ctx, 0, 100, 0, nil)
+	require.NoError(t, err)
+	require.Len(t, updates, 1)
+	require.NotNil(t, updates[0].BusinessMessage)
+	require.Equal(t, int64(2), updates[0].BusinessMessage.MessageID)
+	b.stopUpdateWorker()
+}
