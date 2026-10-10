@@ -1916,10 +1916,9 @@ func (b *BotInstance) DeleteMyCommands(ctx context.Context, req *converter.Delet
 
 // SetMyName changes the bot's name.
 func (b *BotInstance) SetMyName(ctx context.Context, name, langCode string) (bool, error) {
-	_, err := b.raw().BotsSetBotInfo(ctx, &tg.BotsSetBotInfoRequest{
-		Name:     name,
-		LangCode: langCode,
-	})
+	req := &tg.BotsSetBotInfoRequest{LangCode: langCode}
+	req.SetName(name)
+	_, err := b.raw().BotsSetBotInfo(ctx, req)
 	return err == nil, err
 }
 
@@ -1935,11 +1934,13 @@ func (b *BotInstance) GetMyName(ctx context.Context, langCode string) (*converte
 }
 
 // SetMyDescription changes the bot's description.
+//
+// In bots.setBotInfo "description" is the full description and "about" the short one
+// (like TDLib). The field is flagged explicitly so an empty value clears it.
 func (b *BotInstance) SetMyDescription(ctx context.Context, description, langCode string) (bool, error) {
-	_, err := b.raw().BotsSetBotInfo(ctx, &tg.BotsSetBotInfoRequest{
-		About:    description,
-		LangCode: langCode,
-	})
+	req := &tg.BotsSetBotInfoRequest{LangCode: langCode}
+	req.SetDescription(description)
+	_, err := b.raw().BotsSetBotInfo(ctx, req)
 	return err == nil, err
 }
 
@@ -1951,15 +1952,14 @@ func (b *BotInstance) GetMyDescription(ctx context.Context, langCode string) (*c
 	if err != nil {
 		return nil, err
 	}
-	return &converter.BotDescription{Description: info.About}, nil
+	return &converter.BotDescription{Description: info.Description}, nil
 }
 
 // SetMyShortDescription changes the bot's short description.
 func (b *BotInstance) SetMyShortDescription(ctx context.Context, shortDescription, langCode string) (bool, error) {
-	_, err := b.raw().BotsSetBotInfo(ctx, &tg.BotsSetBotInfoRequest{
-		Description: shortDescription,
-		LangCode:    langCode,
-	})
+	req := &tg.BotsSetBotInfoRequest{LangCode: langCode}
+	req.SetAbout(shortDescription)
+	_, err := b.raw().BotsSetBotInfo(ctx, req)
 	return err == nil, err
 }
 
@@ -1971,7 +1971,7 @@ func (b *BotInstance) GetMyShortDescription(ctx context.Context, langCode string
 	if err != nil {
 		return nil, err
 	}
-	return &converter.BotShortDescription{ShortDescription: info.Description}, nil
+	return &converter.BotShortDescription{ShortDescription: info.About}, nil
 }
 
 // SetUserEmojiStatus changes the emoji status for a given user.

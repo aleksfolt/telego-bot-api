@@ -3,6 +3,7 @@ package botmanager
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -436,4 +437,55 @@ func TestGetChatMemberReportsNonParticipantAsLeft(t *testing.T) {
 	member, err := b.GetChatMember(context.Background(), &converter.GetChatMemberRequest{ChatID: -1000000000077, UserID: 456})
 	require.NoError(t, err)
 	require.Equal(t, "left", member.(*converter.ChatMember).Status)
+}
+
+func TestBotInfoDescriptionsUseMatchingMTProtoFields(t *testing.T) {
+	var sent []*tg.BotsSetBotInfoRequest
+	b := mediaTestBot(func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
+		switch req := input.(type) {
+		case *tg.BotsSetBotInfoRequest:
+			var wire bin.Buffer
+			require.NoError(t, req.Encode(&wire))
+			var decoded tg.BotsSetBotInfoRequest
+			require.NoError(t, decoded.Decode(&wire))
+			sent = append(sent, &decoded)
+			*output.(*tg.BoolBox) = tg.BoolBox{Bool: &tg.BoolTrue{}}
+		case *tg.BotsGetBotInfoRequest:
+			*output.(*tg.BotsBotInfo) = tg.BotsBotInfo{Name: "Bot", About: "short", Description: "long"}
+		}
+		return nil
+	})
+	ctx := context.Background()
+	long := strings.Repeat("d", 300) // longer than the 120-character short description limit
+
+	_, err := b.SetMyDescription(ctx, long, "")
+	require.NoError(t, err)
+	_, err = b.SetMyShortDescription(ctx, "short", "")
+	require.NoError(t, err)
+	_, err = b.SetMyDescription(ctx, "", "")
+	require.NoError(t, err)
+	require.Len(t, sent, 3)
+
+	description, ok := sent[0].GetDescription()
+	require.True(t, ok)
+	require.Equal(t, long, description, "setMyDescription sets the full description")
+	_, ok = sent[0].GetAbout()
+	require.False(t, ok)
+
+	about, ok := sent[1].GetAbout()
+	require.True(t, ok)
+	require.Equal(t, "short", about, "setMyShortDescription sets about")
+	_, ok = sent[1].GetDescription()
+	require.False(t, ok)
+
+	description, ok = sent[2].GetDescription()
+	require.True(t, ok, "an empty description is sent to clear it")
+	require.Empty(t, description)
+
+	got, err := b.GetMyDescription(ctx, "")
+	require.NoError(t, err)
+	require.Equal(t, "long", got.Description)
+	short, err := b.GetMyShortDescription(ctx, "")
+	require.NoError(t, err)
+	require.Equal(t, "short", short.ShortDescription)
 }
