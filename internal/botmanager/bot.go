@@ -3411,27 +3411,13 @@ func (b *BotInstance) SendAnimation(ctx context.Context, req *converter.SendAnim
 
 	var media tg.InputMediaClass
 	if len(req.AnimationData) > 0 {
-		fileName := req.AnimationFileName
-		if fileName == "" {
-			fileName = "animation.mp4"
-		}
+		fileName, mimeType := animationFile(req.AnimationFileName, "", req.AnimationData)
 		u := uploader.NewUploader(b.raw())
 		inputFile, err := u.FromBytes(ctx, fileName, req.AnimationData)
 		if err != nil {
 			return nil, fmt.Errorf("upload animation bytes: %w", err)
 		}
-		docMedia := &tg.InputMediaUploadedDocument{
-			File:     inputFile,
-			MimeType: "video/mp4",
-			Attributes: []tg.DocumentAttributeClass{
-				&tg.DocumentAttributeAnimated{},
-				&tg.DocumentAttributeVideo{
-					Duration: float64(req.Duration),
-					W:        req.Width,
-					H:        req.Height,
-				},
-			},
-		}
+		docMedia := animationMedia(inputFile, fileName, mimeType, req.Duration, req.Width, req.Height)
 		if len(req.ThumbnailData) > 0 {
 			if thumbFile, err := u.FromBytes(ctx, "thumb.jpg", req.ThumbnailData); err == nil {
 				docMedia.SetThumb(thumbFile)
@@ -3448,19 +3434,8 @@ func (b *BotInstance) SendAnimation(ctx context.Context, req *converter.SendAnim
 		} else {
 			inputFile, mimeType, fileName, err := b.uploadFromURL(ctx, req.Animation)
 			if err == nil {
-				media = &tg.InputMediaUploadedDocument{
-					File:     inputFile,
-					MimeType: mimeType,
-					Attributes: []tg.DocumentAttributeClass{
-						&tg.DocumentAttributeAnimated{},
-						&tg.DocumentAttributeVideo{
-							Duration: float64(req.Duration),
-							W:        req.Width,
-							H:        req.Height,
-						},
-						&tg.DocumentAttributeFilename{FileName: fileName},
-					},
-				}
+				fileName, mimeType = animationFile(fileName, mimeType, nil)
+				media = animationMedia(inputFile, fileName, mimeType, req.Duration, req.Width, req.Height)
 			} else {
 				media = &tg.InputMediaDocumentExternal{
 					URL: req.Animation,
@@ -3474,25 +3449,13 @@ func (b *BotInstance) SendAnimation(ctx context.Context, req *converter.SendAnim
 			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
 				data, err := os.ReadFile(localPath)
 				if err == nil && len(data) > 0 {
-					fileName := filepath.Base(localPath)
+					fileName, mimeType := animationFile(filepath.Base(localPath), "", data)
 					u := uploader.NewUploader(b.raw())
 					inputFile, err := u.FromBytes(ctx, fileName, data)
 					if err != nil {
 						return nil, fmt.Errorf("upload local animation bytes: %w", err)
 					}
-					media = &tg.InputMediaUploadedDocument{
-						File:     inputFile,
-						MimeType: "video/mp4",
-						Attributes: []tg.DocumentAttributeClass{
-							&tg.DocumentAttributeAnimated{},
-							&tg.DocumentAttributeVideo{
-								Duration: float64(req.Duration),
-								W:        req.Width,
-								H:        req.Height,
-							},
-							&tg.DocumentAttributeFilename{FileName: fileName},
-						},
-					}
+					media = animationMedia(inputFile, fileName, mimeType, req.Duration, req.Width, req.Height)
 				}
 			}
 		}
@@ -3916,16 +3879,22 @@ func (b *BotInstance) resolveInputSingleMedia(ctx context.Context, peer tg.Input
 				attrs = append(attrs, &tg.DocumentAttributeFilename{FileName: fileName})
 			}
 
+			media := &tg.InputMediaUploadedDocument{
+				File:         inputFile,
+				MimeType:     mimeType,
+				NosoundVideo: isVideo,
+				Spoiler:      item.HasSpoiler,
+				Attributes:   attrs,
+			}
+			if item.Type == "animation" {
+				name, animationMime := animationFile(detectedName, detectedMime, nil)
+				media = animationMedia(inputFile, name, animationMime, item.Duration, item.Width, item.Height)
+				media.Spoiler = item.HasSpoiler
+			}
 			res, err := b.raw().MessagesUploadMedia(ctx, &tg.MessagesUploadMediaRequest{
 				BusinessConnectionID: businessConnectionID,
 				Peer:                 peer,
-				Media: &tg.InputMediaUploadedDocument{
-					File:         inputFile,
-					MimeType:     mimeType,
-					NosoundVideo: isVideo,
-					Spoiler:      item.HasSpoiler,
-					Attributes:   attrs,
-				},
+				Media:                media,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("upload document to Telegram: %w", err)
@@ -4032,21 +4001,30 @@ func (b *BotInstance) resolveInputSingleMedia(ctx context.Context, peer tg.Input
 			attrs = append(attrs, &tg.DocumentAttributeFilename{FileName: fileName})
 		}
 
+		var animationMime string
+		if item.Type == "animation" {
+			fileName, animationMime = animationFile(fileName, "", data)
+		}
 		inputFile, err := u.FromBytes(ctx, fileName, data)
 		if err != nil {
 			return nil, fmt.Errorf("upload bytes: %w", err)
 		}
 
+		media := &tg.InputMediaUploadedDocument{
+			File:         inputFile,
+			MimeType:     mimeType,
+			NosoundVideo: isVideo,
+			Spoiler:      item.HasSpoiler,
+			Attributes:   attrs,
+		}
+		if item.Type == "animation" {
+			media = animationMedia(inputFile, fileName, animationMime, item.Duration, item.Width, item.Height)
+			media.Spoiler = item.HasSpoiler
+		}
 		res, err := b.raw().MessagesUploadMedia(ctx, &tg.MessagesUploadMediaRequest{
 			BusinessConnectionID: businessConnectionID,
 			Peer:                 peer,
-			Media: &tg.InputMediaUploadedDocument{
-				File:         inputFile,
-				MimeType:     mimeType,
-				NosoundVideo: isVideo,
-				Spoiler:      item.HasSpoiler,
-				Attributes:   attrs,
-			},
+			Media:                media,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("upload document to Telegram: %w", err)

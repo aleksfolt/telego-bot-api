@@ -365,3 +365,70 @@ func (b *BotInstance) setDocCache(ctx context.Context, key string, doc *tg.Input
 		}()
 	}
 }
+
+// animationFile returns the file name and MIME type of an uploaded animation. The type
+// is taken from the content when it is available: clients often send a GIF named
+// "*.mp4" or without a name, and declaring a GIF as video/mp4 makes Telegram reject the
+// file with MEDIA_FILE_INVALID. mimeHint is the type reported by the source (URL).
+func animationFile(name, mimeHint string, data []byte) (string, string) {
+	mimeType := sniffAnimationMime(data)
+	if mimeType == "" {
+		if parsed, _, err := mime.ParseMediaType(mimeHint); err == nil && parsed != "application/octet-stream" {
+			mimeType = parsed
+		}
+	}
+	if mimeType == "" {
+		switch strings.ToLower(path.Ext(name)) {
+		case ".gif":
+			mimeType = "image/gif"
+		case ".webm":
+			mimeType = "video/webm"
+		default:
+			mimeType = "video/mp4"
+		}
+	}
+
+	var ext string
+	switch mimeType {
+	case "image/gif":
+		ext = ".gif"
+	case "video/webm":
+		ext = ".webm"
+	case "video/mp4":
+		ext = ".mp4"
+	}
+	switch {
+	case name == "":
+		name = "animation" + ext
+	case ext != "" && !strings.EqualFold(path.Ext(name), ext) &&
+		!(ext == ".mp4" && strings.EqualFold(path.Ext(name), ".m4v")):
+		name = strings.TrimSuffix(name, path.Ext(name)) + ext
+	}
+	return name, mimeType
+}
+
+func sniffAnimationMime(data []byte) string {
+	switch {
+	case len(data) >= 6 && (string(data[:6]) == "GIF87a" || string(data[:6]) == "GIF89a"):
+		return "image/gif"
+	case len(data) >= 12 && string(data[4:8]) == "ftyp":
+		return "video/mp4"
+	case len(data) >= 4 && data[0] == 0x1A && data[1] == 0x45 && data[2] == 0xDF && data[3] == 0xA3:
+		return "video/webm"
+	}
+	return ""
+}
+
+// animationMedia builds an animation upload the way TDLib does: an MP4 carries a video
+// attribute, an image (GIF) its size when known. There is no explicit "animated"
+// attribute: Telegram itself decides that the file is an animation.
+func animationMedia(file tg.InputFileClass, fileName, mimeType string, duration, width, height int) *tg.InputMediaUploadedDocument {
+	attrs := []tg.DocumentAttributeClass{&tg.DocumentAttributeFilename{FileName: fileName}}
+	switch {
+	case mimeType == "video/mp4":
+		attrs = append(attrs, &tg.DocumentAttributeVideo{Duration: float64(duration), W: width, H: height})
+	case strings.HasPrefix(mimeType, "image/") && width != 0 && height != 0:
+		attrs = append(attrs, &tg.DocumentAttributeImageSize{W: width, H: height})
+	}
+	return &tg.InputMediaUploadedDocument{File: file, MimeType: mimeType, Attributes: attrs}
+}

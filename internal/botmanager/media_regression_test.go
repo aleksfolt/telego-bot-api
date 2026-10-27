@@ -327,3 +327,75 @@ func TestRegressionEditMediaClearsCaptionAndConvertsResponse(t *testing.T) {
 		})
 	}
 }
+
+func TestSendAnimationDeclaresTheRealFileType(t *testing.T) {
+	gif := append([]byte("GIF89a"), make([]byte, 64)...)
+	mp4 := append([]byte{0, 0, 0, 0x18, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm'}, make([]byte, 64)...)
+	for _, tc := range []struct {
+		name, fileName string
+		data           []byte
+		wantMime       string
+		wantFile       string
+		wantVideo      bool
+	}{
+		{"gif named mp4", "animation.mp4", gif, "image/gif", "animation.gif", false},
+		{"gif without name", "", gif, "image/gif", "animation.gif", false},
+		{"mp4", "clip.mp4", mp4, "video/mp4", "clip.mp4", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var sent *tg.InputMediaUploadedDocument
+			b := mediaTestBot(func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
+				switch req := input.(type) {
+				case *tg.UploadSaveFilePartRequest:
+					output.(*tg.BoolBox).Bool = &tg.BoolTrue{}
+				case *tg.MessagesSendMediaRequest:
+					sent = req.Media.(*tg.InputMediaUploadedDocument)
+					output.(*tg.UpdatesBox).Updates = &tg.Updates{Updates: []tg.UpdateClass{
+						&tg.UpdateNewMessage{Message: &tg.Message{ID: 42, Media: &tg.MessageMediaDocument{
+							Document: &tg.Document{ID: 1, AccessHash: 2, DCID: 2, MimeType: tc.wantMime},
+						}}},
+					}}
+				default:
+					t.Fatalf("unexpected request %T", input)
+				}
+				return nil
+			})
+			_, err := b.SendAnimation(context.Background(), &converter.SendAnimationRequest{
+				ChatID: 123, AnimationData: tc.data, AnimationFileName: tc.fileName, Width: 320, Height: 240,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, sent)
+			require.Equal(t, tc.wantMime, sent.MimeType)
+			var fileName string
+			var hasVideo, hasAnimated, hasImageSize bool
+			for _, attr := range sent.Attributes {
+				switch a := attr.(type) {
+				case *tg.DocumentAttributeFilename:
+					fileName = a.FileName
+				case *tg.DocumentAttributeVideo:
+					hasVideo = true
+				case *tg.DocumentAttributeAnimated:
+					hasAnimated = true
+				case *tg.DocumentAttributeImageSize:
+					hasImageSize = true
+				}
+			}
+			require.Equal(t, tc.wantFile, fileName)
+			require.Equal(t, tc.wantVideo, hasVideo, "only an MP4 is declared as video")
+			require.Equal(t, !tc.wantVideo, hasImageSize, "a GIF carries its image size")
+			require.False(t, hasAnimated, "Telegram decides that the file is an animation, like TDLib")
+		})
+	}
+}
+
+func TestAnimationFileUsesSourceMimeForURLs(t *testing.T) {
+	name, mimeType := animationFile("cat", "image/gif; charset=binary", nil)
+	require.Equal(t, "image/gif", mimeType)
+	require.Equal(t, "cat.gif", name)
+	name, mimeType = animationFile("clip.m4v", "application/octet-stream", nil)
+	require.Equal(t, "video/mp4", mimeType)
+	require.Equal(t, "clip.m4v", name)
+	name, mimeType = animationFile("", "", nil)
+	require.Equal(t, "video/mp4", mimeType)
+	require.Equal(t, "animation.mp4", name)
+}
