@@ -175,6 +175,7 @@ type Message struct {
 	Venue                         *Venue                         `json:"venue,omitempty"`
 	Contact                       *Contact                       `json:"contact,omitempty"`
 	Poll                          *Poll                          `json:"poll,omitempty"`
+	LinkPreviewOptions            *LinkPreviewOptions            `json:"link_preview_options,omitempty"`
 	Checklist                     *Checklist                     `json:"checklist,omitempty"`
 	Dice                          *Dice                          `json:"dice,omitempty"`
 	MediaGroupID                  string                         `json:"media_group_id,omitempty"`
@@ -480,7 +481,11 @@ type ReplyParameters struct {
 
 // LinkPreviewOptions options for link preview generation.
 type LinkPreviewOptions struct {
-	IsDisabled bool `json:"is_disabled,omitempty"`
+	IsDisabled       bool   `json:"is_disabled,omitempty"`
+	URL              string `json:"url,omitempty"`
+	PreferSmallMedia bool   `json:"prefer_small_media,omitempty"`
+	PreferLargeMedia bool   `json:"prefer_large_media,omitempty"`
+	ShowAboveText    bool   `json:"show_above_text,omitempty"`
 }
 
 // SendMessageRequest represents parameters for the sendMessage method.

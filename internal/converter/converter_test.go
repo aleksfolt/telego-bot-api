@@ -601,3 +601,52 @@ func TestConvertUpdateSkipsOwnMessages(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, got)
 }
+
+func TestConvertMessageLinkPreviewIsText(t *testing.T) {
+	newMessage := func(media tg.MessageMediaClass, invert bool) *tg.Message {
+		return &tg.Message{
+			ID: 1, Date: 1, Message: "see https://example.com", PeerID: &tg.PeerUser{UserID: 7},
+			Media: media, InvertMedia: invert,
+		}
+	}
+	convert := func(msg *tg.Message) *converter.Message {
+		result, err := converter.NewMTProtoConverter().ConvertMessage(msg, nil)
+		require.NoError(t, err)
+		return result
+	}
+
+	t.Run("preview", func(t *testing.T) {
+		msg := convert(newMessage(&tg.MessageMediaWebPage{
+			ForceLargeMedia: true,
+			Webpage:         &tg.WebPage{URL: "https://example.com"},
+		}, true))
+		assert.Equal(t, "see https://example.com", msg.Text)
+		assert.Empty(t, msg.Caption)
+		assert.False(t, msg.ShowCaptionAboveMedia)
+		require.NotNil(t, msg.LinkPreviewOptions)
+		assert.Equal(t, converter.LinkPreviewOptions{URL: "https://example.com", PreferLargeMedia: true, ShowAboveText: true},
+			*msg.LinkPreviewOptions)
+	})
+
+	t.Run("pending preview", func(t *testing.T) {
+		msg := convert(newMessage(&tg.MessageMediaWebPage{Webpage: &tg.WebPagePending{URL: "https://example.com"}}, false))
+		assert.Equal(t, "see https://example.com", msg.Text)
+		assert.Empty(t, msg.Caption)
+		require.NotNil(t, msg.LinkPreviewOptions)
+		assert.Equal(t, "https://example.com", msg.LinkPreviewOptions.URL)
+	})
+
+	t.Run("empty media", func(t *testing.T) {
+		msg := convert(newMessage(&tg.MessageMediaEmpty{}, false))
+		assert.Equal(t, "see https://example.com", msg.Text)
+		assert.Nil(t, msg.LinkPreviewOptions)
+	})
+
+	t.Run("real media keeps caption", func(t *testing.T) {
+		msg := convert(newMessage(&tg.MessageMediaPhoto{Photo: &tg.Photo{}}, true))
+		assert.Empty(t, msg.Text)
+		assert.Equal(t, "see https://example.com", msg.Caption)
+		assert.True(t, msg.ShowCaptionAboveMedia)
+		assert.Nil(t, msg.LinkPreviewOptions)
+	})
+}

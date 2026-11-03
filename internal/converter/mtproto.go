@@ -914,7 +914,10 @@ func (c *MTProtoConverter) ConvertMessage(m tg.MessageClass, entities *EntityCon
 	if msg.Noforwards {
 		result.HasProtectedContent = true
 	}
-	if msg.InvertMedia {
+	// A link preview is not media in the official Bot API: the message stays a text
+	// message and the preview settings go to link_preview_options.
+	webPage, isWebPage := msg.Media.(*tg.MessageMediaWebPage)
+	if msg.InvertMedia && !isWebPage {
 		result.ShowCaptionAboveMedia = true
 	}
 	if msg.ViaBotID != 0 {
@@ -928,7 +931,11 @@ func (c *MTProtoConverter) ConvertMessage(m tg.MessageClass, entities *EntityCon
 			result.IsTopicMessage = true
 		}
 	}
-	if msg.Media == nil {
+	if isWebPage {
+		result.Text = msg.Message
+		result.Entities = msgEntities
+		result.LinkPreviewOptions = convertLinkPreviewOptions(webPage, msg.InvertMedia)
+	} else if _, isEmpty := msg.Media.(*tg.MessageMediaEmpty); msg.Media == nil || isEmpty {
 		result.Text = msg.Message
 		result.Entities = msgEntities
 	} else {
@@ -943,6 +950,29 @@ func (c *MTProtoConverter) ConvertMessage(m tg.MessageClass, entities *EntityCon
 		result.ReplyMarkup = ConvertMTProtoReplyMarkup(msg.ReplyMarkup)
 	}
 	return result, nil
+}
+
+// convertLinkPreviewOptions builds link_preview_options of a text message like TDLib does for bots:
+// the URL is always reported, the other flags only when they are set.
+func convertLinkPreviewOptions(media *tg.MessageMediaWebPage, invertMedia bool) *LinkPreviewOptions {
+	var url string
+	switch page := media.Webpage.(type) {
+	case *tg.WebPage:
+		url = page.URL
+	case *tg.WebPagePending:
+		url = page.URL
+	case *tg.WebPageEmpty:
+		url = page.URL
+	}
+	if url == "" && !media.ForceSmallMedia && !media.ForceLargeMedia && !invertMedia {
+		return nil
+	}
+	return &LinkPreviewOptions{
+		URL:              url,
+		PreferSmallMedia: media.ForceSmallMedia,
+		PreferLargeMedia: media.ForceLargeMedia,
+		ShowAboveText:    invertMedia,
+	}
 }
 
 func convertServiceMessage(service *tg.MessageService, entities *EntityContext) *Message {
