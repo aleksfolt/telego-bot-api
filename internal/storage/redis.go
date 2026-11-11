@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gotd/td/session"
@@ -52,6 +53,8 @@ type WebhookData struct {
 // RedisStore provides persistent storage for bot sessions, webhooks, and peer caches.
 type RedisStore struct {
 	client *redis.Client
+
+	seenSince atomic.Int64 // cached UpdatesSeenSince, Unix seconds
 }
 
 // NewRedisStore initializes connection to Redis.
@@ -318,6 +321,32 @@ func (r *RedisStore) NextUpdateID(ctx context.Context, botID int64) (int, error)
 		return 0, fmt.Errorf("incr update_id: %w", err)
 	}
 	return int(n), nil
+}
+
+// MarkUpdateSeen remembers the identity of an update for ttl and reports whether it was
+// seen for the first time. Updates replayed by updates.getDifference are delivered only
+// when this returns true.
+func (r *RedisStore) MarkUpdateSeen(ctx context.Context, botID int64, identity string, ttl time.Duration) (bool, error) {
+	return r.client.SetNX(ctx, fmt.Sprintf("telego:seen:%d:%s", botID, identity), 1, ttl).Result()
+}
+
+// UpdatesSeenSince returns the moment this Redis started to remember delivered updates
+// (see MarkUpdateSeen); the first call records it. What was delivered before it is
+// unknown, so a replayed update from before it cannot be told from a missed one.
+func (r *RedisStore) UpdatesSeenSince(ctx context.Context) (time.Time, error) {
+	if since := r.seenSince.Load(); since != 0 {
+		return time.Unix(since, 0), nil
+	}
+	const key = "telego:seen_since"
+	if err := r.client.SetNX(ctx, key, time.Now().Unix(), 0).Err(); err != nil {
+		return time.Time{}, fmt.Errorf("set updates seen since: %w", err)
+	}
+	since, err := r.client.Get(ctx, key).Int64()
+	if err != nil {
+		return time.Time{}, fmt.Errorf("get updates seen since: %w", err)
+	}
+	r.seenSince.Store(since)
+	return time.Unix(since, 0), nil
 }
 
 // AppendUpdate writes a serialized update payload to the bot's Redis Stream.

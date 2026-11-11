@@ -573,7 +573,8 @@ func (b *BotInstance) processUpdates(u tg.UpdatesClass) {
 	}
 
 	for _, rawUpd := range updatesList {
-		if replayedQtsUpdate(rawUpd) {
+		replayed := replayedQtsUpdate(rawUpd)
+		if replayed && !b.acceptReplayedUpdate(botID, rawUpd) {
 			continue
 		}
 		// Convert first: most MTProto updates (statuses, own outgoing messages) produce no
@@ -585,11 +586,17 @@ func (b *BotInstance) processUpdates(u tg.UpdatesClass) {
 		}
 		if converted != nil {
 			if converted.BusinessConnection != nil {
+				if replayed && !b.businessConnectionChanged(converted.BusinessConnection) {
+					continue
+				}
 				dcID := 0
 				if update, ok := rawUpd.(*tg.UpdateBotBusinessConnect); ok {
 					dcID = update.Connection.DCID
 				}
 				b.cacheBusinessConnection(context.Background(), converted.BusinessConnection, dcID)
+			}
+			if !replayed {
+				b.rememberDeliveredUpdate(botID, rawUpd)
 			}
 			extraUpdates = append(extraUpdates, converted)
 		}

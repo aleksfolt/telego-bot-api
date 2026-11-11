@@ -20,6 +20,7 @@ type Registry struct {
 	durationCnt map[string]*atomic.Uint64 // key: method
 
 	updatesReceived   atomic.Uint64
+	replayedUpdates   sync.Map // outcome -> *atomic.Uint64
 	webhookDeliveries sync.RWMutex
 	webhookStatus     map[string]*atomic.Uint64 // key: status
 
@@ -159,6 +160,17 @@ func (r *Registry) IncUpdatesReceived(count int) {
 	}
 }
 
+// IncReplayedUpdates counts an update replayed by updates.getDifference by its outcome:
+// "recovered" (missed on the live connection and delivered now), "duplicate" (already
+// delivered), "stale" (too old to tell) or "unsupported" (no identity to compare by).
+func (r *Registry) IncReplayedUpdates(outcome string) {
+	counter, ok := r.replayedUpdates.Load(outcome)
+	if !ok {
+		counter, _ = r.replayedUpdates.LoadOrStore(outcome, &atomic.Uint64{})
+	}
+	counter.(*atomic.Uint64).Add(1)
+}
+
 // IncWebhookDelivery records a webhook delivery outcome.
 func (r *Registry) IncWebhookDelivery(status string) {
 	r.webhookDeliveries.RLock()
@@ -256,6 +268,16 @@ func (r *Registry) WritePrometheus(w io.Writer, activeBots, hibernatedBots, webh
 	fmt.Fprintf(w, "# HELP telego_updates_received_total Total updates received from MTProto\n")
 	fmt.Fprintf(w, "# TYPE telego_updates_received_total counter\n")
 	fmt.Fprintf(w, "telego_updates_received_total %d\n\n", r.updatesReceived.Load())
+	fmt.Fprintf(w, "# HELP telego_replayed_updates_total Updates replayed by updates.getDifference, by outcome\n")
+	fmt.Fprintf(w, "# TYPE telego_replayed_updates_total counter\n")
+	for _, outcome := range []string{"recovered", "duplicate", "stale", "unsupported"} {
+		var n uint64
+		if counter, ok := r.replayedUpdates.Load(outcome); ok {
+			n = counter.(*atomic.Uint64).Load()
+		}
+		fmt.Fprintf(w, "telego_replayed_updates_total{outcome=\"%s\"} %d\n", outcome, n)
+	}
+	fmt.Fprintln(w)
 	r.writeBotActivity(w, now)
 
 	// 6. Webhooks
