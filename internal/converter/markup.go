@@ -164,43 +164,22 @@ func parseButtonStyle(style string, iconEmojiID CustomEmojiID) (tg.KeyboardButto
 	return kbs, hasStyle
 }
 
-func applyButtonStyle(btn tg.KeyboardButtonClass, style string, iconEmojiID CustomEmojiID) tg.KeyboardButtonClass {
-	kbs, hasStyle := parseButtonStyle(style, iconEmojiID)
-	if !hasStyle {
-		return btn
+// inlineButton builds an inline keyboard button of the given type, with the style and
+// custom emoji icon the Bot API request asked for.
+func inlineButton(text string, typ tg.InlineButtonTypeClass, style string, iconEmojiID CustomEmojiID) tg.KeyboardInlineButton {
+	btn := tg.KeyboardInlineButton{Text: text, Type: typ}
+	if kbs, hasStyle := parseButtonStyle(style, iconEmojiID); hasStyle {
+		btn.SetStyle(kbs)
 	}
+	return btn
+}
 
-	switch b := btn.(type) {
-	case *tg.KeyboardButtonCallback:
-		b.SetStyle(kbs)
-	case *tg.KeyboardButtonURL:
-		b.SetStyle(kbs)
-	case *tg.KeyboardButtonWebView:
-		b.SetStyle(kbs)
-	case *tg.KeyboardButtonCopy:
-		b.SetStyle(kbs)
-	case *tg.KeyboardButtonSwitchInline:
-		b.SetStyle(kbs)
-	case *tg.KeyboardButtonBuy:
-		b.SetStyle(kbs)
-	case *tg.KeyboardButtonGame:
-		b.SetStyle(kbs)
-	case *tg.InputKeyboardButtonURLAuth:
-		b.SetStyle(kbs)
-	case *tg.KeyboardButton:
-		b.SetStyle(kbs)
-	case *tg.KeyboardButtonSimpleWebView:
-		b.SetStyle(kbs)
-	case *tg.KeyboardButtonRequestPhone:
-		b.SetStyle(kbs)
-	case *tg.KeyboardButtonRequestGeoLocation:
-		b.SetStyle(kbs)
-	case *tg.KeyboardButtonRequestPoll:
-		b.SetStyle(kbs)
-	case *tg.InputKeyboardButtonRequestPeer:
-		b.SetStyle(kbs)
+// replyButton builds a reply keyboard button of the given type, styled like inlineButton.
+func replyButton(text string, typ tg.ButtonTypeClass, style string, iconEmojiID CustomEmojiID) tg.KeyboardButton {
+	btn := tg.KeyboardButton{Text: text, Type: typ}
+	if kbs, hasStyle := parseButtonStyle(style, iconEmojiID); hasStyle {
+		btn.SetStyle(kbs)
 	}
-
 	return btn
 }
 
@@ -222,41 +201,27 @@ func ParseReplyMarkup(raw []byte) (tg.ReplyMarkupClass, error) {
 	// 1. Try Inline Keyboard
 	var inline RawInlineKeyboardMarkup
 	if err := json.Unmarshal(raw, &inline); err == nil && len(inline.InlineKeyboard) > 0 {
-		var rows []tg.KeyboardButtonRow
+		var rows []tg.KeyboardInlineButtonRow
 		for _, rawRow := range inline.InlineKeyboard {
-			var buttons []tg.KeyboardButtonClass
+			var buttons []tg.KeyboardInlineButton
 			for _, btn := range rawRow {
-				var b tg.KeyboardButtonClass
+				var typ tg.InlineButtonTypeClass
 				if btn.WebApp != nil && btn.WebApp.URL != "" {
-					b = &tg.KeyboardButtonWebView{
-						Text: btn.Text,
-						URL:  btn.WebApp.URL,
-					}
+					typ = &tg.InlineButtonTypeWebView{URL: btn.WebApp.URL}
 				} else if btn.CallbackData != "" {
 					data := btn.CallbackData
 					if len(data) > 64 {
 						data = data[:64]
 					}
-					b = &tg.KeyboardButtonCallback{
-						Text: btn.Text,
-						Data: []byte(data),
-					}
+					typ = &tg.InlineButtonTypeCallback{Data: []byte(data)}
 				} else if btn.URL != "" {
-					b = &tg.KeyboardButtonURL{
-						Text: btn.Text,
-						URL:  btn.URL,
-					}
+					typ = &tg.InlineButtonTypeURL{URL: btn.URL}
 				} else if btn.CopyText != nil {
-					b = &tg.KeyboardButtonCopy{
-						Text:     btn.Text,
-						CopyText: btn.CopyText.Text,
-					}
+					typ = &tg.InlineButtonTypeCopy{CopyText: btn.CopyText.Text}
 				} else if btn.LoginURL != nil && btn.LoginURL.URL != "" {
-					auth := &tg.InputKeyboardButtonURLAuth{
-						Text:               btn.Text,
-						URL:                btn.LoginURL.URL,
-						Bot:                &tg.InputUserSelf{},
-						RequestWriteAccess: btn.LoginURL.RequestWriteAccess,
+					auth := &tg.InputInlineButtonTypeURLAuth{
+						URL: btn.LoginURL.URL,
+						Bot: &tg.InputUserSelf{},
 					}
 					if btn.LoginURL.ForwardText != "" {
 						auth.SetFwdText(btn.LoginURL.ForwardText)
@@ -264,18 +229,11 @@ func ParseReplyMarkup(raw []byte) (tg.ReplyMarkupClass, error) {
 					if btn.LoginURL.RequestWriteAccess {
 						auth.SetRequestWriteAccess(true)
 					}
-					b = auth
+					typ = auth
 				} else if btn.SwitchInlineQuery != nil {
-					b = &tg.KeyboardButtonSwitchInline{
-						Text:  btn.Text,
-						Query: *btn.SwitchInlineQuery,
-					}
+					typ = &tg.InlineButtonTypeSwitchInline{Query: *btn.SwitchInlineQuery}
 				} else if btn.SwitchInlineQueryCurrentChat != nil {
-					b = &tg.KeyboardButtonSwitchInline{
-						Text:     btn.Text,
-						Query:    *btn.SwitchInlineQueryCurrentChat,
-						SamePeer: true,
-					}
+					typ = &tg.InlineButtonTypeSwitchInline{Query: *btn.SwitchInlineQueryCurrentChat, SamePeer: true}
 				} else if btn.SwitchInlineQueryChosenChat != nil {
 					var peerTypes []tg.InlineQueryPeerTypeClass
 					if btn.SwitchInlineQueryChosenChat.AllowUserChats {
@@ -290,26 +248,19 @@ func ParseReplyMarkup(raw []byte) (tg.ReplyMarkupClass, error) {
 					if btn.SwitchInlineQueryChosenChat.AllowChannelChats {
 						peerTypes = append(peerTypes, &tg.InlineQueryPeerTypeBroadcast{})
 					}
-					sw := &tg.KeyboardButtonSwitchInline{
-						Text:  btn.Text,
-						Query: btn.SwitchInlineQueryChosenChat.Query,
-					}
+					sw := &tg.InlineButtonTypeSwitchInline{Query: btn.SwitchInlineQueryChosenChat.Query}
 					if len(peerTypes) > 0 {
 						sw.SetPeerTypes(peerTypes)
 					}
-					b = sw
+					typ = sw
 				} else if btn.CallbackGame != nil {
-					b = &tg.KeyboardButtonGame{
-						Text: btn.Text,
-					}
+					typ = &tg.InlineButtonTypeGame{}
 				} else if btn.Pay {
-					b = &tg.KeyboardButtonBuy{
-						Text: btn.Text,
-					}
+					typ = &tg.InlineButtonTypeBuy{}
 				} else {
-					// Fallback for inline keyboard: MUST NEVER use standard tg.KeyboardButton.
-					// Standard KeyboardButton inside ReplyInlineMarkup triggers BUTTON_TYPE_INVALID in MTProto.
-					// And Data must NEVER be empty (length 0 triggers BUTTON_DATA_INVALID).
+					// Fallback for inline keyboard: only inline button types are valid here, a
+					// reply keyboard button type triggers BUTTON_TYPE_INVALID in MTProto. And
+					// Data must NEVER be empty (length 0 triggers BUTTON_DATA_INVALID).
 					data := btn.CallbackData
 					if data == "" {
 						data = "noop"
@@ -317,14 +268,11 @@ func ParseReplyMarkup(raw []byte) (tg.ReplyMarkupClass, error) {
 					if len(data) > 64 {
 						data = data[:64]
 					}
-					b = &tg.KeyboardButtonCallback{
-						Text: btn.Text,
-						Data: []byte(data),
-					}
+					typ = &tg.InlineButtonTypeCallback{Data: []byte(data)}
 				}
-				buttons = append(buttons, applyButtonStyle(b, btn.Style, btn.IconCustomEmojiID))
+				buttons = append(buttons, inlineButton(btn.Text, typ, btn.Style, btn.IconCustomEmojiID))
 			}
-			rows = append(rows, tg.KeyboardButtonRow{Buttons: buttons})
+			rows = append(rows, tg.KeyboardInlineButtonRow{Buttons: buttons})
 		}
 		return &tg.ReplyInlineMarkup{Rows: rows}, nil
 	}
@@ -355,25 +303,19 @@ func ParseReplyMarkup(raw []byte) (tg.ReplyMarkupClass, error) {
 	if err := json.Unmarshal(raw, &reply); err == nil && len(reply.Keyboard) > 0 {
 		var rows []tg.KeyboardButtonRow
 		for _, rawRow := range reply.Keyboard {
-			var buttons []tg.KeyboardButtonClass
+			var buttons []tg.KeyboardButton
 			for _, btn := range rawRow {
-				var b tg.KeyboardButtonClass
+				var typ tg.ButtonTypeClass
 				if btn.RequestContact {
-					b = &tg.KeyboardButtonRequestPhone{
-						Text: btn.Text,
-					}
+					typ = &tg.ButtonTypeRequestPhone{}
 				} else if btn.RequestLocation {
-					b = &tg.KeyboardButtonRequestGeoLocation{
-						Text: btn.Text,
-					}
+					typ = &tg.ButtonTypeRequestGeoLocation{}
 				} else if btn.RequestPoll != nil {
-					pollBtn := &tg.KeyboardButtonRequestPoll{
-						Text: btn.Text,
-					}
+					pollBtn := &tg.ButtonTypeRequestPoll{}
 					if btn.RequestPoll.Type == "quiz" {
 						pollBtn.SetQuiz(true)
 					}
-					b = pollBtn
+					typ = pollBtn
 				} else if btn.RequestUsers != nil {
 					reqUser := &tg.RequestPeerTypeUser{}
 					if btn.RequestUsers.UserIsBot != nil {
@@ -386,8 +328,7 @@ func ParseReplyMarkup(raw []byte) (tg.ReplyMarkupClass, error) {
 					if maxQ <= 0 {
 						maxQ = 1
 					}
-					btnReq := &tg.InputKeyboardButtonRequestPeer{
-						Text:        btn.Text,
+					btnReq := &tg.InputButtonTypeRequestPeer{
 						ButtonID:    btn.RequestUsers.RequestID,
 						MaxQuantity: maxQ,
 						PeerType:    reqUser,
@@ -401,7 +342,7 @@ func ParseReplyMarkup(raw []byte) (tg.ReplyMarkupClass, error) {
 					if btn.RequestUsers.RequestPhoto {
 						btnReq.SetPhotoRequested(true)
 					}
-					b = btnReq
+					typ = btnReq
 				} else if btn.RequestChat != nil {
 					var peerType tg.RequestPeerTypeClass
 					if btn.RequestChat.ChatIsChannel {
@@ -426,8 +367,7 @@ func ParseReplyMarkup(raw []byte) (tg.ReplyMarkupClass, error) {
 						}
 						peerType = ch
 					}
-					btnReq := &tg.InputKeyboardButtonRequestPeer{
-						Text:        btn.Text,
+					btnReq := &tg.InputButtonTypeRequestPeer{
 						ButtonID:    btn.RequestChat.RequestID,
 						MaxQuantity: 1,
 						PeerType:    peerType,
@@ -441,18 +381,13 @@ func ParseReplyMarkup(raw []byte) (tg.ReplyMarkupClass, error) {
 					if btn.RequestChat.RequestPhoto {
 						btnReq.SetPhotoRequested(true)
 					}
-					b = btnReq
+					typ = btnReq
 				} else if btn.WebApp != nil && btn.WebApp.URL != "" {
-					b = &tg.KeyboardButtonSimpleWebView{
-						Text: btn.Text,
-						URL:  btn.WebApp.URL,
-					}
+					typ = &tg.ButtonTypeSimpleWebView{URL: btn.WebApp.URL}
 				} else {
-					b = &tg.KeyboardButton{
-						Text: btn.Text,
-					}
+					typ = &tg.ButtonTypeDefault{}
 				}
-				buttons = append(buttons, applyButtonStyle(b, btn.Style, btn.IconCustomEmojiID))
+				buttons = append(buttons, replyButton(btn.Text, typ, btn.Style, btn.IconCustomEmojiID))
 			}
 			rows = append(rows, tg.KeyboardButtonRow{Buttons: buttons})
 		}
@@ -489,54 +424,39 @@ func ConvertMTProtoReplyMarkup(rm tg.ReplyMarkupClass) *InlineKeyboardMarkup {
 	for _, row := range inline.Rows {
 		var buttons []InlineKeyboardButton
 		for _, btn := range row.Buttons {
-			var ikb InlineKeyboardButton
-			var style tg.KeyboardButtonStyle
-			var hasStyle bool
+			ikb := InlineKeyboardButton{Text: btn.Text}
 
-			switch b := btn.(type) {
-			case *tg.KeyboardButtonCallback:
-				ikb.Text = b.Text
+			switch b := btn.Type.(type) {
+			case *tg.InlineButtonTypeCallback:
 				ikb.CallbackData = string(b.Data)
-				style, hasStyle = b.GetStyle()
-			case *tg.KeyboardButtonURL:
-				ikb.Text = b.Text
+			case *tg.InlineButtonTypeURL:
 				ikb.URL = b.URL
-				style, hasStyle = b.GetStyle()
-			case *tg.KeyboardButtonWebView:
-				ikb.Text = b.Text
+			case *tg.InlineButtonTypeWebView:
 				ikb.WebApp = &RawWebAppInfo{URL: b.URL}
-				style, hasStyle = b.GetStyle()
-			case *tg.KeyboardButtonCopy:
-				ikb.Text = b.Text
+			case *tg.InlineButtonTypeCopy:
 				ikb.CopyText = &RawCopyTextButton{Text: b.CopyText}
-				style, hasStyle = b.GetStyle()
-			case *tg.KeyboardButtonSwitchInline:
-				ikb.Text = b.Text
+			case *tg.InlineButtonTypeSwitchInline:
+				query := b.Query
 				if b.SamePeer {
-					ikb.SwitchInlineQueryCurrentChat = &b.Query
+					ikb.SwitchInlineQueryCurrentChat = &query
 				} else {
-					ikb.SwitchInlineQuery = &b.Query
+					ikb.SwitchInlineQuery = &query
 				}
-				style, hasStyle = b.GetStyle()
-			case *tg.KeyboardButtonBuy:
-				ikb.Text = b.Text
+			case *tg.InlineButtonTypeBuy:
 				ikb.Pay = true
-				style, hasStyle = b.GetStyle()
-			case *tg.KeyboardButtonGame:
-				ikb.Text = b.Text
+			case *tg.InlineButtonTypeGame:
 				ikb.CallbackGame = &RawCallbackGame{}
-				style, hasStyle = b.GetStyle()
-			case *tg.InputKeyboardButtonURLAuth:
-				ikb.Text = b.Text
+			case *tg.InlineButtonTypeURLAuth:
+				ikb.LoginURL = &RawLoginURL{URL: b.URL, ForwardText: b.FwdText}
+			case *tg.InputInlineButtonTypeURLAuth:
 				ikb.LoginURL = &RawLoginURL{
 					URL:                b.URL,
 					ForwardText:        b.FwdText,
 					RequestWriteAccess: b.RequestWriteAccess,
 				}
-				style, hasStyle = b.GetStyle()
 			}
 
-			if hasStyle {
+			if style, hasStyle := btn.GetStyle(); hasStyle {
 				if style.BgPrimary {
 					ikb.Style = "primary"
 				} else if style.BgDanger {

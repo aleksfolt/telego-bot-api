@@ -32,15 +32,17 @@ func TestParseInlineKeyboard(t *testing.T) {
 	require.Len(t, inlineMarkup.Rows, 1)
 	require.Len(t, inlineMarkup.Rows[0].Buttons, 2)
 
-	btn1, ok := inlineMarkup.Rows[0].Buttons[0].(*tg.KeyboardButtonCallback)
+	btn1 := inlineMarkup.Rows[0].Buttons[0]
+	cb1, ok := btn1.Type.(*tg.InlineButtonTypeCallback)
 	require.True(t, ok)
 	assert.Equal(t, "Button 1", btn1.Text)
-	assert.Equal(t, []byte("action_1"), btn1.Data)
+	assert.Equal(t, []byte("action_1"), cb1.Data)
 
-	btn2, ok := inlineMarkup.Rows[0].Buttons[1].(*tg.KeyboardButtonURL)
+	btn2 := inlineMarkup.Rows[0].Buttons[1]
+	url2, ok := btn2.Type.(*tg.InlineButtonTypeURL)
 	require.True(t, ok)
 	assert.Equal(t, "Google", btn2.Text)
-	assert.Equal(t, "https://google.com", btn2.URL)
+	assert.Equal(t, "https://google.com", url2.URL)
 }
 
 func TestParseInlineKeyboard_WebApp(t *testing.T) {
@@ -60,10 +62,11 @@ func TestParseInlineKeyboard_WebApp(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, inlineMarkup.Rows, 1)
 
-	btn, ok := inlineMarkup.Rows[0].Buttons[0].(*tg.KeyboardButtonWebView)
+	btn := inlineMarkup.Rows[0].Buttons[0]
+	webView, ok := btn.Type.(*tg.InlineButtonTypeWebView)
 	require.True(t, ok)
 	assert.Equal(t, "Mini App", btn.Text)
-	assert.Equal(t, "https://webapp.example.com", btn.URL)
+	assert.Equal(t, "https://webapp.example.com", webView.URL)
 }
 
 func TestParseReplyKeyboard(t *testing.T) {
@@ -86,7 +89,7 @@ func TestParseReplyKeyboard(t *testing.T) {
 	assert.True(t, replyMarkup.SingleUse)
 	require.Len(t, replyMarkup.Rows, 2)
 
-	_, ok = replyMarkup.Rows[0].Buttons[0].(*tg.KeyboardButtonRequestPhone)
+	_, ok = replyMarkup.Rows[0].Buttons[0].Type.(*tg.ButtonTypeRequestPhone)
 	assert.True(t, ok)
 }
 
@@ -327,15 +330,17 @@ func TestParseInlineKeyboard_CopyTextAndEmptyData(t *testing.T) {
 	require.Len(t, inlineMarkup.Rows, 1)
 	require.Len(t, inlineMarkup.Rows[0].Buttons, 2)
 
-	btn1, ok := inlineMarkup.Rows[0].Buttons[0].(*tg.KeyboardButtonCopy)
+	btn1 := inlineMarkup.Rows[0].Buttons[0]
+	copy1, ok := btn1.Type.(*tg.InlineButtonTypeCopy)
 	require.True(t, ok)
 	assert.Equal(t, "Copy Username", btn1.Text)
-	assert.Equal(t, "@ShadyCloudTestBot", btn1.CopyText)
+	assert.Equal(t, "@ShadyCloudTestBot", copy1.CopyText)
 
-	btn2, ok := inlineMarkup.Rows[0].Buttons[1].(*tg.KeyboardButtonCallback)
+	btn2 := inlineMarkup.Rows[0].Buttons[1]
+	cb2, ok := btn2.Type.(*tg.InlineButtonTypeCallback)
 	require.True(t, ok)
 	assert.Equal(t, "Empty Button", btn2.Text)
-	assert.NotEmpty(t, btn2.Data) // Must never be empty (BUTTON_DATA_INVALID protection)
+	assert.NotEmpty(t, cb2.Data) // Must never be empty (BUTTON_DATA_INVALID protection)
 }
 
 func TestParseInlineKeyboard_AllTypes(t *testing.T) {
@@ -357,13 +362,13 @@ func TestParseInlineKeyboard_AllTypes(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, inlineMarkup.Rows[0].Buttons, 3)
 
-	_, ok = inlineMarkup.Rows[0].Buttons[0].(*tg.KeyboardButtonGame)
+	_, ok = inlineMarkup.Rows[0].Buttons[0].Type.(*tg.InlineButtonTypeGame)
 	assert.True(t, ok)
 
-	_, ok = inlineMarkup.Rows[0].Buttons[1].(*tg.KeyboardButtonBuy)
+	_, ok = inlineMarkup.Rows[0].Buttons[1].Type.(*tg.InlineButtonTypeBuy)
 	assert.True(t, ok)
 
-	sw, ok := inlineMarkup.Rows[0].Buttons[2].(*tg.KeyboardButtonSwitchInline)
+	sw, ok := inlineMarkup.Rows[0].Buttons[2].Type.(*tg.InlineButtonTypeSwitchInline)
 	require.True(t, ok)
 	assert.Equal(t, "search", sw.Query)
 	types, ok := sw.GetPeerTypes()
@@ -390,19 +395,19 @@ func TestParseReplyKeyboard_RequestTypes(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, replyMarkup.Rows[0].Buttons, 3)
 
-	pollBtn, ok := replyMarkup.Rows[0].Buttons[0].(*tg.KeyboardButtonRequestPoll)
+	pollBtn, ok := replyMarkup.Rows[0].Buttons[0].Type.(*tg.ButtonTypeRequestPoll)
 	require.True(t, ok)
 	quiz, ok := pollBtn.GetQuiz()
 	assert.True(t, ok)
 	assert.True(t, quiz)
 
-	userBtn, ok := replyMarkup.Rows[0].Buttons[1].(*tg.InputKeyboardButtonRequestPeer)
+	userBtn, ok := replyMarkup.Rows[0].Buttons[1].Type.(*tg.InputButtonTypeRequestPeer)
 	require.True(t, ok)
 	assert.Equal(t, 1, userBtn.ButtonID)
 	assert.Equal(t, 3, userBtn.MaxQuantity)
 	assert.True(t, userBtn.NameRequested)
 
-	chatBtn, ok := replyMarkup.Rows[0].Buttons[2].(*tg.InputKeyboardButtonRequestPeer)
+	chatBtn, ok := replyMarkup.Rows[0].Buttons[2].Type.(*tg.InputButtonTypeRequestPeer)
 	require.True(t, ok)
 	assert.Equal(t, 2, chatBtn.ButtonID)
 	_, isBroadcast := chatBtn.PeerType.(*tg.RequestPeerTypeBroadcast)
@@ -432,7 +437,8 @@ func TestParseInlineKeyboard_ButtonStyles(t *testing.T) {
 	require.Len(t, inlineMarkup.Rows, 2)
 
 	// Row 0, Btn 0: Primary
-	btn0, ok := inlineMarkup.Rows[0].Buttons[0].(*tg.KeyboardButtonCallback)
+	btn0 := inlineMarkup.Rows[0].Buttons[0]
+	_, ok = btn0.Type.(*tg.InlineButtonTypeCallback)
 	require.True(t, ok)
 	style0, ok0 := btn0.GetStyle()
 	require.True(t, ok0)
@@ -441,7 +447,8 @@ func TestParseInlineKeyboard_ButtonStyles(t *testing.T) {
 	assert.False(t, style0.BgSuccess)
 
 	// Row 0, Btn 1: Danger
-	btn1, ok := inlineMarkup.Rows[0].Buttons[1].(*tg.KeyboardButtonCallback)
+	btn1 := inlineMarkup.Rows[0].Buttons[1]
+	_, ok = btn1.Type.(*tg.InlineButtonTypeCallback)
 	require.True(t, ok)
 	style1, ok1 := btn1.GetStyle()
 	require.True(t, ok1)
@@ -450,7 +457,8 @@ func TestParseInlineKeyboard_ButtonStyles(t *testing.T) {
 	assert.False(t, style1.BgSuccess)
 
 	// Row 0, Btn 2: Success
-	btn2, ok := inlineMarkup.Rows[0].Buttons[2].(*tg.KeyboardButtonCallback)
+	btn2 := inlineMarkup.Rows[0].Buttons[2]
+	_, ok = btn2.Type.(*tg.InlineButtonTypeCallback)
 	require.True(t, ok)
 	style2, ok2 := btn2.GetStyle()
 	require.True(t, ok2)
@@ -459,7 +467,8 @@ func TestParseInlineKeyboard_ButtonStyles(t *testing.T) {
 	assert.True(t, style2.BgSuccess)
 
 	// Row 1, Btn 0: Primary + Icon
-	btn3, ok := inlineMarkup.Rows[1].Buttons[0].(*tg.KeyboardButtonURL)
+	btn3 := inlineMarkup.Rows[1].Buttons[0]
+	_, ok = btn3.Type.(*tg.InlineButtonTypeURL)
 	require.True(t, ok)
 	style3, ok3 := btn3.GetStyle()
 	require.True(t, ok3)
@@ -469,7 +478,7 @@ func TestParseInlineKeyboard_ButtonStyles(t *testing.T) {
 	// Test binary serialization/deserialization to ensure MTProto wire format is valid
 	var buf bin.Buffer
 	require.NoError(t, btn0.Encode(&buf))
-	var decoded tg.KeyboardButtonCallback
+	var decoded tg.KeyboardInlineButton
 	require.NoError(t, decoded.Decode(&buf))
 	decStyle, decOk := decoded.GetStyle()
 	require.True(t, decOk)
@@ -504,13 +513,15 @@ func TestParseReplyKeyboard_ButtonStyles(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, replyMarkup.Rows, 1)
 
-	btn0, ok := replyMarkup.Rows[0].Buttons[0].(*tg.KeyboardButton)
+	btn0 := replyMarkup.Rows[0].Buttons[0]
+	_, ok = btn0.Type.(*tg.ButtonTypeDefault)
 	require.True(t, ok)
 	s0, ok0 := btn0.GetStyle()
 	require.True(t, ok0)
 	assert.True(t, s0.BgDanger)
 
-	btn1, ok := replyMarkup.Rows[0].Buttons[1].(*tg.KeyboardButton)
+	btn1 := replyMarkup.Rows[0].Buttons[1]
+	_, ok = btn1.Type.(*tg.ButtonTypeDefault)
 	require.True(t, ok)
 	s1, ok1 := btn1.GetStyle()
 	require.True(t, ok1)

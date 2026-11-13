@@ -2584,7 +2584,7 @@ func (b *BotInstance) VerifyUser(ctx context.Context, req *converter.VerifyUserR
 	}
 	request := &tg.BotsSetCustomVerificationRequest{Enabled: true, Peer: peer}
 	if req.CustomDescription != "" {
-		request.SetCustomDescription(req.CustomDescription)
+		request.SetCustomDescription(tg.TextWithEntities{Text: req.CustomDescription})
 	}
 	return b.raw().BotsSetCustomVerification(ctx, request)
 }
@@ -2597,7 +2597,7 @@ func (b *BotInstance) VerifyChat(ctx context.Context, req *converter.VerifyChatR
 	}
 	request := &tg.BotsSetCustomVerificationRequest{Enabled: true, Peer: peer}
 	if req.CustomDescription != "" {
-		request.SetCustomDescription(req.CustomDescription)
+		request.SetCustomDescription(tg.TextWithEntities{Text: req.CustomDescription})
 	}
 	return b.raw().BotsSetCustomVerification(ctx, request)
 }
@@ -3673,21 +3673,21 @@ func (b *BotInstance) SavePreparedKeyboardButton(ctx context.Context, req *conve
 
 // parseSingleKeyboardButton converts one Bot API KeyboardButton (a JSON object or a JSON-encoded
 // string) by reusing the reply keyboard parser.
-func parseSingleKeyboardButton(raw json.RawMessage) (tg.KeyboardButtonClass, error) {
+func parseSingleKeyboardButton(raw json.RawMessage) (tg.KeyboardButton, error) {
 	var encoded string
 	if err := json.Unmarshal(raw, &encoded); err == nil {
 		raw = json.RawMessage(encoded)
 	}
 	if len(raw) == 0 || !json.Valid(raw) {
-		return nil, fmt.Errorf("Can't parse keyboard button JSON object")
+		return tg.KeyboardButton{}, fmt.Errorf("Can't parse keyboard button JSON object")
 	}
 	markup, err := converter.ParseReplyMarkup([]byte(`{"keyboard":[[` + string(raw) + `]]}`))
 	if err != nil {
-		return nil, fmt.Errorf("Can't parse keyboard button: %w", err)
+		return tg.KeyboardButton{}, fmt.Errorf("Can't parse keyboard button: %w", err)
 	}
 	keyboard, ok := markup.(*tg.ReplyKeyboardMarkup)
 	if !ok || len(keyboard.Rows) != 1 || len(keyboard.Rows[0].Buttons) != 1 {
-		return nil, fmt.Errorf("Can't parse keyboard button")
+		return tg.KeyboardButton{}, fmt.Errorf("Can't parse keyboard button")
 	}
 	return keyboard.Rows[0].Buttons[0], nil
 }
