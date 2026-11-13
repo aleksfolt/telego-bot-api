@@ -14,7 +14,10 @@ import (
 	"github.com/gotd/td/tgerr"
 )
 
-var floodRegex = regexp.MustCompile(`(?:FLOOD_(?:PREMIUM_)?WAIT_|SLOWMODE_WAIT_)(\d+)`)
+// floodRegex matches both spellings of a flood wait: the RPC error code with an underscore
+// (FLOOD_WAIT_3) and gotd's text form of an error with an argument (FLOOD_WAIT (3)), which
+// is what reaches MapErrorString when a handler passes err.Error() on.
+var floodRegex = regexp.MustCompile(`(?:FLOOD_(?:PREMIUM_)?WAIT|SLOWMODE_WAIT)(?:_| \()(\d+)`)
 var migrateRegex = regexp.MustCompile(`MIGRATE_TO_(\d+)`)
 
 // unauthorizedRegex matches only RPC errors meaning the bot itself is not authorized.

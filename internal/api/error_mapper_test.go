@@ -2,11 +2,14 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
 	"github.com/gotd/td/tgerr"
 	"github.com/stretchr/testify/require"
+	"github.com/valyala/fasthttp"
+	"go.uber.org/zap"
 )
 
 func TestMapRpcError_FloodWait(t *testing.T) {
@@ -172,4 +175,45 @@ func TestMapErrorStringTransientErrorsAreNotBadRequest(t *testing.T) {
 		code, _, _ := MapErrorString(desc)
 		require.Equal(t, want, code, desc)
 	}
+}
+
+// A handler that passes err.Error() on reaches MapErrorString with gotd's text form of
+// the error, where the wait is an argument in parentheses.
+func TestMapErrorString_FloodWaitWithParenthesisedArgument(t *testing.T) {
+	for desc, want := range map[string]int{
+		"mtproto send message: rpcDoRequest: rpc error code 420: FLOOD_WAIT (3)":            3,
+		"mtproto business send message: rpcDoRequest: rpc error code 420: FLOOD_WAIT (227)": 227,
+		"mtproto send sticker: rpc error code 420: FLOOD_PREMIUM_WAIT (12)":                 12,
+		"rpc error code 420: SLOWMODE_WAIT (30)":                                            30,
+		"rpc error code 420: FLOOD_WAIT_9":                                                  9,
+	} {
+		code, text, params := MapErrorString(desc)
+		require.Equal(t, 429, code, desc)
+		require.NotNil(t, params, desc)
+		require.Equal(t, want, params.RetryAfter, desc)
+		require.Equal(t, fmt.Sprintf("Too Many Requests: retry after %d", want), text, desc)
+	}
+
+	code, _, params := MapErrorString("mtproto send message: rpc error code 400: MESSAGE_TOO_LONG")
+	require.Equal(t, 400, code)
+	require.Nil(t, params)
+}
+
+func TestRespondErrorTurnsAFloodWaitIntoRetryAfter(t *testing.T) {
+	s := &Server{logger: zap.NewNop()}
+	ctx := &fasthttp.RequestCtx{}
+	s.respondError(ctx, 400, "mtproto send message: rpcDoRequest: rpc error code 420: FLOOD_WAIT (3)")
+
+	require.Equal(t, 429, ctx.Response.StatusCode())
+	var resp struct {
+		OK         bool `json:"ok"`
+		ErrorCode  int  `json:"error_code"`
+		Parameters struct {
+			RetryAfter int `json:"retry_after"`
+		} `json:"parameters"`
+	}
+	require.NoError(t, json.Unmarshal(ctx.Response.Body(), &resp))
+	require.False(t, resp.OK)
+	require.Equal(t, 429, resp.ErrorCode)
+	require.Equal(t, 3, resp.Parameters.RetryAfter)
 }

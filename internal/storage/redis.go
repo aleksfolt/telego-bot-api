@@ -25,8 +25,12 @@ type UpdateEntry struct {
 }
 
 const (
-	// streamMaxLen is the approximate cap for updates per bot stream (MAXLEN ~).
-	streamMaxLen = 10_000
+	// streamMaxLen is the approximate cap for updates per bot stream (MAXLEN ~). Delivered
+	// updates leave the stream, so it only fills while the application does not accept
+	// them (restart, deploy, outage), and then the oldest entries are cut off silently. The
+	// busiest bot receives about 5000 updates a minute at peak, so 100k covers some twenty
+	// minutes of downtime (10k covered two) at a few hundred MB of Redis memory at worst.
+	streamMaxLen = 100_000
 )
 
 // updateStreamKey returns the Redis Stream key for a bot by its user ID.

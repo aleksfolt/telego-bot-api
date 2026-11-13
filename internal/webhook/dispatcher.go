@@ -188,7 +188,10 @@ func (d *Dispatcher) sendWebhook(req *fasthttp.Request, resp *fasthttp.Response,
 					if skipped > 0 {
 						fields = append(fields, zap.Int("sampled_out", skipped))
 					}
-					d.logger.Info("Webhook delivered successfully", fields...)
+					// Debug: a delivered update is counted in telego_webhook_deliveries_total, and
+					// at info level these lines (up to 300 a minute per busy bot) pushed everything
+					// else out of the journal within three days. Failures are still logged as errors.
+					d.logger.Debug("Webhook delivered successfully", fields...)
 				}
 				return nil
 			}

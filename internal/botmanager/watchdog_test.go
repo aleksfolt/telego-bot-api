@@ -119,7 +119,7 @@ func TestWatchdogRestartsBusyStuckBotOnce(t *testing.T) {
 	_, restart := w.check(lastUpdate.Add(time.Minute), 0)
 	require.False(t, restart, "a short silence is normal")
 	_, restart = w.check(lastUpdate.Add(5*time.Minute), 0)
-	require.False(t, restart, "silence without a stalled request is not a hang")
+	require.False(t, restart, "a burst of activity followed by silence is not a hang")
 
 	w.mu.Lock()
 	w.lastStall = lastUpdate.Add(30 * time.Second)
@@ -218,4 +218,52 @@ func TestDownloadSlotsAreBounded(t *testing.T) {
 	release, err := b.acquireDownloadSlot(context.Background())
 	require.NoError(t, err)
 	release()
+}
+
+// steadyTraffic feeds perMinute updates in each of the given minutes before the returned
+// moment of the last update.
+func steadyTraffic(w *clientWatchdog, start time.Time, minutes, perMinute int) time.Time {
+	var last time.Time
+	for m := 0; m < minutes; m++ {
+		last = start.Add(time.Duration(m)*time.Minute + 30*time.Second)
+		w.noteUpdates(last, perMinute)
+	}
+	return last
+}
+
+func TestWatchdogRestartsSteadilyBusyBotThatWentSilent(t *testing.T) {
+	var w clientWatchdog
+	last := steadyTraffic(&w, time.Unix(1_800_000_000, 0), 10, 5000)
+
+	_, restart := w.check(last.Add(50*time.Second), 0)
+	require.False(t, restart, "a short silence is normal")
+	reason, restart := w.check(last.Add(70*time.Second), 0)
+	require.True(t, restart, "a heavily loaded bot silent for over a minute is hung, even without a stalled request")
+	require.Equal(t, "no updates from a steadily busy bot", reason)
+
+	_, restart = w.check(last.Add(70*time.Second+2*time.Minute), 0)
+	require.False(t, restart, "restarts are spaced")
+	_, restart = w.check(last.Add(70*time.Second+3*time.Minute), 0)
+	require.True(t, restart, "a failed attempt is retried after the quiet restart interval")
+}
+
+func TestWatchdogQuietRuleScalesWithTheUsualRate(t *testing.T) {
+	var w clientWatchdog
+	last := steadyTraffic(&w, time.Unix(1_800_000_000, 0), 10, 6) // 6 updates a minute
+	_, restart := w.check(last.Add(3*time.Minute+20*time.Second), 0)
+	require.False(t, restart, "a slow bot may stay silent for minutes")
+	_, restart = w.check(last.Add(watchdogSilence+time.Second), 0)
+	require.True(t, restart)
+}
+
+func TestWatchdogQuietRuleIgnoresBurstsAndLongSilence(t *testing.T) {
+	var burst clientWatchdog
+	last := steadyTraffic(&burst, time.Unix(1_800_000_000, 0), 3, 5000)
+	_, restart := burst.check(last.Add(10*time.Minute), 0)
+	require.False(t, restart, "activity in only a few minutes is not steady traffic")
+
+	var gone clientWatchdog
+	last = steadyTraffic(&gone, time.Unix(1_800_000_000, 0), 10, 5000)
+	_, restart = gone.check(last.Add(watchdogQuietGiveUp+time.Minute), 0)
+	require.False(t, restart, "a bot silent for half an hour is taken to be legitimately quiet")
 }
