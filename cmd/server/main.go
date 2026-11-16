@@ -29,6 +29,7 @@ func main() {
 	}
 	defer logger.Sync() //nolint:errcheck
 	logging.ConfigureSampling(cfg.LogSampleFirst, cfg.LogSampleThereafter)
+	botmanager.SetWireTraceBots(cfg.TraceBots)
 
 	logger.Info("Initializing telego-bot-api gateway",
 		zap.Int("app_id", cfg.AppID),

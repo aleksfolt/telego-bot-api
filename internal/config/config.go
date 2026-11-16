@@ -26,11 +26,13 @@ type Config struct {
 	LogSampleFirst      int
 	LogSampleThereafter int
 	MTProtoDebug        bool
-	PprofAddr           string
-	WarmupAll           bool
-	HTTPReadTimeout     time.Duration
-	HTTPWriteTimeout    time.Duration
-	HTTPIdleTimeout     time.Duration
+	// TraceBots lists bots whose MTProto lifecycle and service messages are logged at info level.
+	TraceBots        []int64
+	PprofAddr        string
+	WarmupAll        bool
+	HTTPReadTimeout  time.Duration
+	HTTPWriteTimeout time.Duration
+	HTTPIdleTimeout  time.Duration
 	// PublicStatus exposes /health, /status and /metrics to public IPs.
 	// By default they answer only loopback and private-network clients.
 	PublicStatus bool
@@ -104,6 +106,9 @@ func Load() *Config {
 	if val := getEnv("TELEGO_MTPROTO_DEBUG", "MTPROTO_DEBUG"); val == "true" || val == "1" {
 		cfg.MTProtoDebug = true
 	}
+	if val := getEnv("TELEGO_TRACE_BOTS", "TRACE_BOTS"); val != "" {
+		cfg.TraceBots = parseBotIDs(val)
+	}
 	if val := getEnv("TELEGO_PPROF_ADDR", "PPROF_ADDR"); val != "" {
 		cfg.PprofAddr = val
 	}
@@ -138,7 +143,7 @@ func Load() *Config {
 		}
 	}
 
-	var ipsFlag string
+	var ipsFlag, traceBotsFlag string
 	var readTimeoutFlag, writeTimeoutFlag, idleTimeoutFlag string
 	flag.IntVar(&cfg.AppID, "api-id", cfg.AppID, "Telegram API ID (from my.telegram.org)")
 	flag.StringVar(&cfg.AppHash, "api-hash", cfg.AppHash, "Telegram API Hash")
@@ -152,6 +157,7 @@ func Load() *Config {
 	flag.IntVar(&cfg.LogSampleFirst, "log-sample-first", cfg.LogSampleFirst, "Per-event log lines (updates, webhook deliveries, API requests) written in full per bot per second")
 	flag.IntVar(&cfg.LogSampleThereafter, "log-sample-thereafter", cfg.LogSampleThereafter, "After log-sample-first, write every Nth per-event line of a bot (<= 1 disables sampling)")
 	flag.BoolVar(&cfg.MTProtoDebug, "mtproto-debug", cfg.MTProtoDebug, "Enable verbose wire-level MTProto transport debug dumps (default: false)")
+	flag.StringVar(&traceBotsFlag, "trace-bots", "", "Comma-separated bot IDs whose MTProto connection lifecycle, ping/pong and bad_msg notifications are logged at info level")
 	flag.StringVar(&cfg.StallDumpDir, "stall-dump-dir", cfg.StallDumpDir, "Directory for automatic goroutine dumps on stalls (empty disables)")
 	flag.StringVar(&cfg.PprofAddr, "pprof-addr", cfg.PprofAddr, "Optional address for pprof HTTP server (e.g. 127.0.0.1:6060)")
 	flag.BoolVar(&cfg.WarmupAll, "warmup-all", cfg.WarmupAll, "Warm up all registered bots in background (default: false, lazy on-demand like official telegram-bot-api)")
@@ -161,6 +167,9 @@ func Load() *Config {
 	flag.StringVar(&idleTimeoutFlag, "http-idle-timeout", "", "HTTP idle timeout (e.g. 60s, 2m; default: 60s)")
 	flag.Parse()
 
+	if traceBotsFlag != "" {
+		cfg.TraceBots = parseBotIDs(traceBotsFlag)
+	}
 	if ipsFlag != "" {
 		cfg.OutboundIPs = strings.Split(ipsFlag, ",")
 	}
@@ -196,4 +205,15 @@ func getEnv(keys ...string) string {
 		}
 	}
 	return ""
+}
+
+// parseBotIDs parses a comma-separated list of bot IDs, ignoring entries that are not numbers.
+func parseBotIDs(list string) []int64 {
+	var ids []int64
+	for _, part := range strings.Split(list, ",") {
+		if id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }

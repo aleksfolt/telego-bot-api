@@ -179,6 +179,10 @@ func NewBotInstance(
 			retryMiddleware{logger: logger}, businessErrorMiddleware{}, gapUpdatesMiddleware{bot: bot}},
 	}
 
+	if wireTraceEnabled(botID) {
+		opts.WireTracer = newWireTracer(logger, botID)
+	}
+
 	if dialer != nil {
 		opts.Resolver = dcs.Plain(dcs.PlainOptions{
 			Dial: dialer.DialContext,
