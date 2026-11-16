@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/gotd/log/logzap v0.1.1
-	github.com/gotd/td v0.165.1
+	github.com/gotd/td v0.166.1
 	github.com/redis/go-redis/v9 v9.5.1
 	github.com/stretchr/testify v1.11.1
 	github.com/valyala/fasthttp v1.72.0
@@ -39,9 +39,9 @@ require (
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/yuin/goldmark v1.8.5 // indirect
-	go.opentelemetry.io/otel v1.44.0 // indirect
-	go.opentelemetry.io/otel/metric v1.44.0 // indirect
-	go.opentelemetry.io/otel/trace v1.44.0 // indirect
+	go.opentelemetry.io/otel v1.45.0 // indirect
+	go.opentelemetry.io/otel/metric v1.45.0 // indirect
+	go.opentelemetry.io/otel/trace v1.45.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
